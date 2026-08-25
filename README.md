@@ -1,50 +1,71 @@
-# Welcome to your Expo app 👋
+# MY PET APP
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+An [Expo](https://expo.dev) app built with [Expo Router](https://docs.expo.dev/router/introduction/).
 
-## Get started
+The engineering foundation, design system, and application shell are in place — configuration,
+error handling, logging, design tokens, UI primitives, and a five-tab owner navigation. No product
+features are implemented yet. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it all fits together,
+[app/README.md](app/README.md) for the routing conventions, and
+[features/README.md](features/README.md) for where the first feature goes.
 
-1. Install dependencies
+## Getting started
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+Requires **Node 20.19.4 or newer** (Expo SDK 54's floor).
 
 ```bash
-npm run reset-project
+npm install
+cp .env.example .env.local   # then edit for your machine
+npm start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+From the Expo CLI you can open the app in a
+[development build](https://docs.expo.dev/develop/development-builds/introduction/), an
+[Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/), an
+[iOS simulator](https://docs.expo.dev/workflow/ios-simulator/), or
+[Expo Go](https://expo.dev/go).
 
-## Learn more
+## Scripts
 
-To learn more about developing your project with Expo, look at the following resources:
+| Command                   | What it does                                        |
+| ------------------------- | --------------------------------------------------- |
+| `npm start`               | Start the Expo dev server                           |
+| `npm run android/ios/web` | Start and open on a specific platform               |
+| `npm run verify`          | Typecheck, lint, and test — run this before pushing |
+| `npm run typecheck`       | TypeScript, no emit                                 |
+| `npm run lint`            | ESLint (includes Prettier formatting)               |
+| `npm run lint:fix`        | ESLint with autofix                                 |
+| `npm run format`          | Rewrite files with Prettier                         |
+| `npm test`                | Jest                                                |
+| `npm run test:watch`      | Jest in watch mode                                  |
+| `npm run test:coverage`   | Jest with a coverage report                         |
+| `npm run doctor`          | `expo-doctor` — checks dependencies against the SDK |
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Environment
 
-## Join the community
+Configuration comes from `.env.local` (git-ignored) using the variables documented in
+[.env.example](.env.example). Every variable is prefixed `EXPO_PUBLIC_`, which means it is inlined
+into the JavaScript bundle and readable by anyone who installs the app — **never put a secret in
+one**.
 
-Join our community of developers creating universal apps.
+Values are read and validated once, at startup, in [lib/env.ts](lib/env.ts). A missing or malformed
+value fails loudly there rather than surfacing as an `undefined` somewhere downstream.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Project layout
+
+```
+app/            Routes (file-based); app/(owner)/ holds the owner's five tabs
+features/       Business logic, one directory per feature
+components/ui/  The design system — import from '@/components/ui'
+hooks/          Shared React hooks, including theme resolution
+lib/            Config, errors, logging, results
+constants/      Design tokens
+```
+
+## Working in this repo
+
+Read [AGENTS.md](AGENTS.md) — it holds the conventions that are not obvious from the code, and it
+applies to humans and AI agents alike.
+
+Because Expo changes quickly, always check the exact versioned docs for
+[SDK 54](https://docs.expo.dev/versions/v54.0.0/) rather than a search result that may describe an
+older release.
