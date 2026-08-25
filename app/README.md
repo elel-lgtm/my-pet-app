@@ -28,9 +28,10 @@ rather than as extra tabs:
 
 ```
 app/
+  (auth)/...              sign-in, sign-up, forgot-password — reached only when signed out
   (owner)/(tabs)/...      5 tabs — pets you own
-  (caregiver)/(tabs)/...  a different tab set — pets shared with you
-  (admin)/...             platform administration; probably not tabs at all
+  (caregiver)/(tabs)/...  a different tab set — pets shared with you (not built)
+  (admin)/...             platform administration; probably not tabs at all (not built)
 ```
 
 Each area gets its own navigator, tab set, and chrome. The alternative — one tab bar with tabs
@@ -47,12 +48,23 @@ Two of these three are **not** role-gated, and the distinction matters:
   system health. It is not a route to other people's pets or locations; administrators have no
   automatic access to those. See [ARCHITECTURE.md](../ARCHITECTURE.md).
 
-**No authentication exists yet.** `(owner)` is simply the anchor route, set via `unstable_settings`
-in the root layout. When authentication arrives the root layout chooses the entry area; nothing
-about the routes below has to change.
+## Authentication gating
+
+The root layout uses `Stack.Protected` to decide which half of the app exists:
+
+```
+signed out   →  (auth) exists, (owner) does not
+signed in    →  (owner) exists, (auth) does not
+restoring    →  neither; the loading screen is shown instead
+```
+
+`Protected` **removes** guarded routes from the navigator rather than hiding them, so a signed-out
+user cannot reach `(owner)` by a deep link, a stale history entry, or a programmatic push. Holding
+both halves back while the session is restored is what stops private chrome appearing for a frame.
 
 Reaching a route is not permission to see its data. A gated group keeps a screen out of the way; it
-is the server that refuses the query behind it.
+is the database that refuses the query behind it. Route guards are a UX concern; row-level security
+is the boundary.
 
 ## Adding a screen
 

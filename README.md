@@ -2,9 +2,10 @@
 
 An [Expo](https://expo.dev) app built with [Expo Router](https://docs.expo.dev/router/introduction/).
 
-The engineering foundation, design system, and application shell are in place — configuration,
-error handling, logging, design tokens, UI primitives, and a five-tab owner navigation. No product
-features are implemented yet. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it all fits together,
+The engineering foundation, design system, application shell, database, and authentication are in
+place — configuration, error handling, logging, design tokens, UI primitives, a five-tab owner
+navigation, seven tables with row-level security, and email/password sign-in. No pet, map, alert,
+or sharing feature is implemented yet. See [ARCHITECTURE.md](ARCHITECTURE.md) for how it all fits together,
 [app/README.md](app/README.md) for the routing conventions, and
 [features/README.md](features/README.md) for where the first feature goes.
 
@@ -62,8 +63,21 @@ shipping one would give every installed copy of the app unrestricted access to e
 Startup validation rejects one if it is pasted into the publishable variable, but that is a
 backstop rather than the control.
 
-Authentication, row-level security, the database schema, and GPS tracking are **not implemented
-yet**. See [ARCHITECTURE.md](ARCHITECTURE.md) and [supabase/README.md](supabase/README.md).
+### Signing in
+
+Authentication is email and password through Supabase Auth. Creating an account gives you a
+`member` profile — the account level is written by a database trigger and cannot be influenced by
+anything the app sends.
+
+Sessions are stored in the device keystore (`expo-secure-store`) on native and `localStorage` on
+web, and survive a restart.
+
+If your Supabase project requires email confirmation, sign-up will say so and no session is issued
+until the link is opened. **Completing confirmation or a password reset inside the app needs a deep
+link that is not built yet** — both emails are sent, but the return journey lands in a browser.
+
+GPS tracking, maps, pet management, alerts, and sharing are **not implemented**. See
+[ARCHITECTURE.md](ARCHITECTURE.md) and [supabase/README.md](supabase/README.md).
 
 ## Project layout
 

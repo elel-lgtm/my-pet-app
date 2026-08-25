@@ -6,20 +6,22 @@ The PostgreSQL schema behind MY PET APP, as applied to the linked Supabase proje
 
 ## Status
 
-|                                |                                                        |
-| ------------------------------ | ------------------------------------------------------ |
-| Migrations written and applied | **Yes** — 10 migrations, all applied                   |
-| Tables                         | **7**, all created                                     |
-| Row-level security             | **Enabled on all 7 tables**                            |
-| RLS policies                   | **Zero, deliberately** — every table denies all access |
-| Generated TypeScript types     | **Yes** — `lib/supabase/database.types.ts`             |
-| Authentication                 | **Not implemented**                                    |
-| Data in the database           | **None**                                               |
+|                                |                                                     |
+| ------------------------------ | --------------------------------------------------- |
+| Migrations written and applied | **Yes** — 16 migrations, all applied                |
+| Tables                         | **7**, all created                                  |
+| Row-level security             | **Enabled on all 7 tables**                         |
+| RLS policies                   | **10** — profiles (3) and the pet family (7)        |
+| Authentication                 | **Implemented** — Supabase Auth, email and password |
+| Profile synchronisation        | **Implemented** — trigger on `auth.users`           |
+| Role protection                | **Implemented** — no account can promote itself     |
+| Generated TypeScript types     | **Yes** — `lib/supabase/database.types.ts`          |
+| Data in the database           | **None**                                            |
 
-> **Every application table denies every request right now.** RLS is on and no policy exists, which
-> in PostgreSQL means no row is visible or writable through the API, to anyone. That is the correct
-> resting state until authentication exists: a policy written before `auth.uid()` means anything
-> would have to be either wrong or dangerously permissive.
+> **Access is a relationship, never a role.** An owner reaches pets they own; a caregiver reaches
+> pets shared with them by an accepted, unexpired share; nobody else reaches anything. There is no
+> policy granting access on the strength of being signed in, and none granting it on the strength
+> of being an administrator. Both properties are asserted by `supabase/tests/rls.sql`.
 
 Three headings organise what follows:
 
@@ -280,28 +282,124 @@ precisely so that removing a cause does not remove the evidence.
 
 ## Row-level security
 
-RLS is `enable`d on all seven tables, in the same migration that creates each one. **No policies
-exist**, so PostgreSQL denies every row to every API role.
+RLS is `enable`d on all seven tables, in the same migration that creates each one, and ten policies
+are now in place.
 
 `force row level security` is deliberately **not** used. `enable` already constrains `anon` and
-`authenticated`, which are the roles a client can ever hold; `force` additionally constrains the
-table owner, which would only add friction to migrations and dashboard work. It would also interfere
-with the planned `SECURITY DEFINER` access helper, whose ability to bypass RLS as owner is exactly
-what prevents infinite recursion between the `pets` and `pet_shares` policies.
+`authenticated`, the only roles a client can hold. `force` would additionally constrain the table
+owner — which would break the `SECURITY DEFINER` access helpers, whose ability to read as the owner
+is exactly what stops the `pets` and `pet_shares` policies recursing into each other.
 
-Supabase's default grants give `anon` and `authenticated` table privileges, which is expected:
-grants decide whether an operation is _possible_, RLS decides which _rows_ it sees. With no policy,
-the row set is empty regardless of the grant. Both layers are needed once policies exist — revoking
-the grants now would make the future policies silently fail.
+### The access helpers
+
+Every pet-related policy reduces to one of two questions, so both are answered in one place:
+
+| Function                     | Answers                                             |
+| ---------------------------- | --------------------------------------------------- |
+| `private.owns_pet(uuid)`     | Does the caller own this pet?                       |
+| `private.can_read_pet(uuid)` | Does the caller own it, or hold an effective share? |
+
+Both are `SECURITY DEFINER` with `search_path` pinned to the empty string.
+
+**They live in a `private` schema, not `public`.** Supabase's advisor flagged the original
+`public` versions as callable through `/rest/v1/rpc/<name>` by both `anon` and `authenticated` —
+Supabase's default privileges grant EXECUTE to those roles _explicitly_, so revoking the PUBLIC
+grant did not cover it. Only `public` and `graphql_public` are served by PostgREST, so moving them
+removes the possibility rather than the permission. `authenticated` keeps EXECUTE because policy
+expressions are evaluated as the querying user.
+
+> **The expiry clause is not optional.** `expires_at is null or expires_at > now()` appears in
+> `can_read_pet` and must appear in any future access predicate. A share whose moment has passed is
+> not an access grant even while its `status` still reads `accepted`, because nothing guarantees a
+> cleanup job has run. `supabase/tests/rls.sql` asserts exactly this case.
+
+### Policies
+
+| Table           | Policy                 | Grants                                                        |
+| --------------- | ---------------------- | ------------------------------------------------------------- |
+| `profiles`      | `profiles_select_self` | Read your own profile, and only your own                      |
+| `profiles`      | `profiles_insert_self` | Create a profile whose id is your own account                 |
+| `profiles`      | `profiles_update_self` | Edit your own profile (except `role` — see below)             |
+| `pets`          | `pets_select`          | Owned or effectively shared, and not soft-deleted             |
+| `pets`          | `pets_insert`          | Create a pet you own                                          |
+| `pets`          | `pets_update`          | Edit a pet you own; `with check` blocks reassigning ownership |
+| `pet_locations` | `pet_locations_select` | Read where you can read the pet                               |
+| `safe_zones`    | `safe_zones_select`    | As above                                                      |
+| `alerts`        | `alerts_select`        | As above                                                      |
+| `pet_shares`    | `pet_shares_select`    | The grant naming you, or grants on a pet you own              |
+
+All are scoped `to authenticated`, so `anon` never evaluates them. All use `(select auth.uid())`
+rather than a bare call, which is evaluated once per statement as an InitPlan instead of once per
+row.
+
+**No DELETE policy exists on any table.** Pets are soft-deleted through the update policy; profiles
+are removed by the cascade from `auth.users`.
+
+### What is deliberately not granted
+
+- **No administrator bypass.** No policy mentions `role = 'admin'`. An administrator reading these
+  tables is subject to `can_read_pet()` like anyone else, and the RLS suite asserts an admin sees
+  zero pets, locations, safe zones, and alerts.
+- **No blanket authenticated access.** `auth.uid() is not null` appears in no policy. Being signed
+  in is not a reason to see somebody's pet.
+- **No client writes to `pet_locations`, `safe_zones`, `alerts`, or `pet_shares`.** Those belong to
+  the feature phases that introduce them. Location writes will never be granted to clients at all:
+  a client that can forge its own pet's location can forge a safe-zone breach, and every alert
+  downstream inherits the lie.
+
+## Authentication
+
+Supabase Auth, email and password. `profiles.id` **is** `auth.users.id`, so one account has exactly
+one profile by primary key rather than by convention.
+
+### Profile synchronisation
+
+`private.handle_new_user()` runs `after insert on auth.users` and creates the profile row.
+
+A trigger rather than a client insert, because a client insert requires trusting the client to
+supply its own id — and "insert a row whose id you choose" is the shape of an account-takeover bug.
+`SECURITY DEFINER` is required because sign-up runs as `supabase_auth_admin`, which has no
+privileges on `public.profiles`.
+
+**`role` is the literal `'member'`.** It is never read from `raw_user_meta_data`, which is entirely
+client-controlled — it is whatever the app passed to `signUp({ options: { data } })`, and a
+modified client can put anything there. The display name _is_ taken from that metadata, because a
+display name grants nothing, and it is truncated to the column limit so an oversized value cannot
+fail the whole sign-up.
+
+### Role protection
+
+`private.prevent_self_role_change()` runs `before update on public.profiles` and raises when `role`
+changes and `auth.uid()` is not null.
+
+Without it, any signed-in user could run `update profiles set role = 'admin' where id = auth.uid()`
+— a statement the update policy otherwise permits, because a policy checks _which row_ is written,
+not which columns. PostgreSQL RLS cannot compare a column's old and new values, so the rule needs a
+trigger.
+
+The `auth.uid() is not null` test is true exactly when the write arrives through the API carrying an
+end-user's JWT. A privileged path — the SQL editor, a migration, a service-role process — has no
+`auth.uid()` and is allowed through, because those are the trusted routes by which an administrator
+is meant to be appointed.
 
 ## Verification
 
-`supabase/tests/constraints.sql` exercises every structural rule with writes that must fail and
-writes that must succeed, inside a transaction that is rolled back. **39 checks, all passing.**
+Two SQL suites, each running inside a transaction that is rolled back.
+
+| Suite                            | Proves                                                  | Checks              |
+| -------------------------------- | ------------------------------------------------------- | ------------------- |
+| `supabase/tests/constraints.sql` | The schema rejects malformed data                       | **39, all passing** |
+| `supabase/tests/rls.sql`         | The database refuses to _show_ data to the wrong person | **32, all passing** |
+
+The RLS suite simulates real signed-in sessions by switching to the `authenticated` role and setting
+the JWT claims `auth.uid()` reads, then asks what each user can see. It covers owner, caregiver,
+stranger, and administrator; every share state including elapsed-but-still-marked-accepted; soft
+deletion; anonymous access; and every privilege-escalation route.
 
 ```bash
-npm run db:verify     # the constraint suite
-npm run db:advisors   # Supabase's own security and performance lint
+npm run db:verify     # constraint suite
+npm run db:rls        # row-level security suite
+npm run db:advisors   # Supabase's own security and performance lint (currently: no issues)
 ```
 
 It is intentionally not a Jest test: it needs a real PostgreSQL instance, and the Jest suite must
@@ -309,114 +407,20 @@ never depend on a live project.
 
 ## Migrations
 
-Ten, forward-only, all applied. Details and the CLI workflow are in
+Sixteen, forward-only, all applied. Details and the CLI workflow are in
 [supabase/README.md](supabase/README.md).
 
 ---
 
-# REQUIRED IN THE AUTH/RLS PHASE
-
-Nothing below exists yet. All of it depends on authentication, because every rule is expressed in
-terms of `auth.uid()`.
-
-## The access helper
-
-Every child table's policy reduces to "can this user reach the parent pet", so that question should
-be answered in exactly one place:
-
-```sql
-create or replace function public.can_read_pet(target_pet uuid)
-returns boolean
-language sql
-stable
-security definer            -- avoids recursive RLS evaluation on pets/pet_shares
-set search_path = ''
-as $$
-  select exists (
-    select 1 from public.pets p
-    where p.id = target_pet
-      and p.deleted_at is null
-      and (
-        p.owner_id = auth.uid()
-        or exists (
-          select 1 from public.pet_shares s
-          where s.pet_id = p.id
-            and s.caregiver_id = auth.uid()
-            and s.status = 'accepted'
-            and (s.expires_at is null or s.expires_at > now())
-        )
-      )
-  );
-$$;
-```
-
-`security definer` is required, not stylistic: without it, evaluating this inside a policy on `pets`
-re-enters the policy on `pets` and recurses. The `search_path` pin is the standard mitigation for
-the escalation that definer rights otherwise invite.
-
-**It is not created yet, on purpose.** With no policy calling it, it would be a definer-rights
-function sitting in the database doing nothing — dead code in the one place where dead code is a
-liability. It arrives with the policies that use it, and is reviewed alongside them.
-
-> **The expiry clause is not optional.** `s.expires_at is null or s.expires_at > now()` must appear
-> in every access predicate. A share whose moment has passed is not an access grant even while its
-> `status` still reads `accepted`, because nothing guarantees a cleanup job has run. Relying on the
-> status column alone would leave elapsed caregivers with live access.
-
-## Policies
-
-```sql
--- profiles: you read and edit yourself. `role` must be excluded from the update.
-create policy profiles_select_self on public.profiles
-  for select using (id = auth.uid());
-create policy profiles_insert_self on public.profiles
-  for insert with check (id = auth.uid());
-create policy profiles_update_self on public.profiles
-  for update using (id = auth.uid()) with check (id = auth.uid());
-
--- pets: owner has full control; caregiver reads only.
-create policy pets_select on public.pets
-  for select using (deleted_at is null and public.can_read_pet(id));
-create policy pets_insert on public.pets
-  for insert with check (owner_id = auth.uid());
-create policy pets_update on public.pets
-  for update using (owner_id = auth.uid()) with check (owner_id = auth.uid());
-
--- child tables: reachability through the pet.
-create policy locations_select on public.pet_locations
-  for select using (public.can_read_pet(pet_id));
-create policy safe_zones_select on public.safe_zones
-  for select using (public.can_read_pet(pet_id));
-create policy alerts_select on public.alerts
-  for select using (public.can_read_pet(pet_id));
-
--- shares: the owner manages them; the invited caregiver sees and accepts their own.
-create policy shares_select on public.pet_shares
-  for select using (
-    caregiver_id = auth.uid()
-    or exists (select 1 from public.pets p where p.id = pet_id and p.owner_id = auth.uid())
-  );
-```
-
-**Writes to `pet_locations` are never granted to end users.** Fixes arrive through server-side
-ingestion that validates the payload. A client that can forge its own pet's location can forge a
-safe-zone breach, and every alert downstream inherits that lie.
-
-## Two further requirements
-
-**`profiles.role` must not be writable by its holder.** A user who can run
-`update profiles set role = 'admin'` on their own row has granted themselves administration. The
-update policy excludes the column; a trigger should enforce it too, because a column omission is
-easy to lose in a later migration.
-
-**Profile creation should be a trigger on `auth.users`**, `SECURITY DEFINER`, so a profile row
-appears exactly once per account and its `id` is taken from the new user rather than supplied by a
-client.
+# REQUIRED LATER
 
 ## The administrator policy
 
-Settled in Phase 9.3 and unchanged: **administration is platform-level and confers no access to pet
-or location data.**
+Settled in Phase 9.3, implemented in Phase 10 by _not_ writing a policy, and asserted by the RLS
+suite: **administration is platform-level and confers no access to pet or location data.**
+
+What remains for a later phase is the administrative surface itself — the platform tables an
+administrator would act on, and the audit log that makes those actions accountable.
 
 There is therefore **no admin bypass clause in any policy on `pets`, `pet_locations`, `safe_zones`,
 `alerts`, or `pet_shares`** — not a narrow one, not a commented-out one. An administrator reading

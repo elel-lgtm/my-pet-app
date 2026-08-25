@@ -35,16 +35,16 @@ end $$;
 -- ---------------------------------------------------------------------------------------------
 -- Fixtures. Two unrelated accounts, so cross-owner rules can be tested.
 -- ---------------------------------------------------------------------------------------------
-insert into auth.users (id, email, instance_id, aud, role)
+-- Profiles are created by the on_auth_user_created trigger, not inserted here. Inserting them
+-- as well would collide on the primary key, which is itself a small proof the trigger fired.
+insert into auth.users (id, email, instance_id, aud, role, raw_user_meta_data)
 values
   ('11111111-1111-4111-8111-111111111111', 'alice@example.com',
-   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated'),
+   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+   '{"display_name": "Alice"}'::jsonb),
   ('22222222-2222-4222-8222-222222222222', 'bob@example.com',
-   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated');
-
-insert into public.profiles (id, email, display_name) values
-  ('11111111-1111-4111-8111-111111111111', 'alice@example.com', 'Alice'),
-  ('22222222-2222-4222-8222-222222222222', 'bob@example.com', 'Bob');
+   '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
+   '{"display_name": "Bob"}'::jsonb);
 
 insert into public.pets (id, owner_id, name, species) values
   ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '11111111-1111-4111-8111-111111111111', 'Biscuit', 'dog'),
@@ -62,7 +62,8 @@ select pg_temp.must_reject('profile_requires_auth_user', $q$
   values ('44444444-4444-4444-8444-444444444444', 'ghost@example.com', 'Ghost') $q$);
 
 select pg_temp.must_reject('profile_display_name_not_empty', $q$
-  update public.profiles set display_name = '' where display_name = 'Alice' $q$);
+  update public.profiles set display_name = ''
+  where id = '11111111-1111-4111-8111-111111111111' $q$);
 
 -- ---------------------------------------------------------------------------------------------
 -- pets

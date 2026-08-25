@@ -8,6 +8,7 @@
 
 export * from '@/lib/domain/access';
 export * from '@/lib/domain/alert';
+export * from '@/lib/domain/auth';
 export * from '@/lib/domain/geo';
 export * from '@/lib/domain/ids';
 export * from '@/lib/domain/location';

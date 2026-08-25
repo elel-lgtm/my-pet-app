@@ -303,22 +303,17 @@ development and test only, applies no authorization, and is imported by no UI co
 
 ### What is and is not true today
 
-The Supabase project exists, the schema is applied, and the app can construct a typed client.
+The Supabase project exists, the schema is applied with row-level security enforced, and
+authentication works.
 
-> **AUTHENTICATION IS NOT IMPLEMENTED.**
-> **NO RLS POLICY EXISTS — every table denies all access.**
 > **GPS TRACKING IS NOT IMPLEMENTED.**
+> **No pet, map, alert, or sharing feature is implemented** — those screens are placeholders.
 > **There is no data in the database.**
 
-The seven tables from the approved domain model are created, constrained, indexed, and have
-row-level security enabled. What they do _not_ have is a single policy, which in PostgreSQL means
-no row is readable or writable through the API by anyone. That is the correct resting state: a
-policy written before `auth.uid()` means anything would have to be either wrong or dangerously
-permissive.
-
-So the database is currently secure in the way an empty locked room is secure. Nothing below should
-be read as evidence that user data is protected once people and their pets are actually in it —
-the policies that will do that are specified in [DATABASE.md](DATABASE.md) and not yet written.
+Ten policies are in place. Access is a relationship, never a role: an owner reaches pets they own, a
+caregiver reaches pets shared with them by an accepted and unexpired share, and nobody else reaches
+anything. No policy grants access for being signed in, and none grants it for being an
+administrator. Both properties are asserted against the live database by `supabase/tests/rls.sql`.
 
 ### Schema
 
@@ -415,6 +410,115 @@ where `parseEnv` refuses to build an `Env` without them.
 Migrations, CLI setup, and the intended migration order are in
 [supabase/README.md](supabase/README.md). Nothing has been applied to any database yet.
 
+## Authentication
+
+Supabase Auth, email and password. **Authentication establishes identity; authorization stays a
+separate concern** decided by row-level security in the database.
+
+### The layers
+
+```
+screens (app/(auth)/*, features/auth/screens/*)
+  ↓  read one context
+AuthProvider  (features/auth)          ← the only auth state in the app
+  ↓  calls the port
+AuthRepository  (lib/data/ports.ts)
+  ↓  implemented by
+the Supabase adapter  (lib/data/supabase/auth-repository.ts)
+  ↓
+Supabase Auth
+```
+
+`lib/data/supabase/auth-repository.ts` is the only module that calls `supabase.auth`. ESLint blocks
+`app/`, `components/`, and `features/` from importing `@/lib/supabase` or `@supabase/*` at all, so
+the boundary is enforced rather than requested.
+
+### Session state
+
+One provider, mounted once at the root, holding a five-state machine: `initializing`,
+`signed-out`, `signed-in`, `signing-out`, `error`. Nothing else keeps a copy — duplicated auth
+state is how an app ends up showing a signed-out header above signed-in content.
+
+The `error` state is reserved for the **session layer** failing: restoration threw, or the provider
+was unreachable at start-up. A rejected password is _not_ an auth-state error — it is returned to
+the screen that asked and shown beside the field concerned. Routing a mistyped password through
+global state would tear the whole app down to an error screen.
+
+Two details worth knowing:
+
+- **The event subscription lives for the provider's lifetime**, not for the duration of
+  restoration. Tying the two together tears it down the moment start-up finishes, after which the
+  app stops hearing about a session revoked on another device, a failed refresh, or a sign-out —
+  it would look signed in until the next cold start.
+- **Sign-out clears local state even when the server call fails.** Leaving someone signed in after
+  they asked to sign out, on a shared or lost device, is worse than a stale session on the server.
+
+### Session persistence
+
+Tokens are held in the device keystore: Keychain on iOS, Keystore-encrypted preferences on Android,
+via `expo-secure-store`. The refresh token is the sensitive part — long-lived and exchangeable for
+new access tokens — which rules out AsyncStorage, a plaintext file readable from any backup or
+rooted device.
+
+SecureStore has a practical size limit around 2 KB and a Supabase session exceeds it, so
+`lib/supabase/session-storage.ts` splits values into chunks across several keys with a small index.
+Chunking keeps everything in the keystore and avoids the alternative — encrypting the blob with
+`aes-js` and storing the key in SecureStore — which would add three dependencies and a hand-rolled
+crypto path. A torn write reads as "no session" rather than as corrupt JSON.
+
+Web has no keystore, so `session-storage.web.ts` falls back to `localStorage` with every access
+guarded: it throws outright in Safari private browsing and under some storage policies, and a
+storage error must not take the app down.
+
+**Token refresh follows the app lifecycle.** A backgrounded React Native app has its timers
+throttled, so refresh is started on foreground and stopped on background via `AppState` rather than
+left running on a free-standing timer.
+
+### Route protection
+
+`Stack.Protected` in the root layout, guarded on the auth state:
+
+- **Signed out** — `(auth)` exists, `(owner)` does not.
+- **Signed in** — `(owner)` exists, `(auth)` does not.
+- **Still restoring** — neither is rendered; the loading screen is shown instead.
+
+`Protected` _removes_ guarded routes from the navigator rather than hiding them, so a signed-out
+user cannot reach `(owner)` by a deep link, a stale history entry, or a programmatic push. That is
+stronger than redirecting after the fact, which mounts the screen first and navigates away
+afterwards.
+
+Holding both halves back during restoration is what stops private chrome appearing for a frame
+before the app discovers the user is signed out.
+
+> **This is navigation, not authorization.** It decides which screens exist, not what data they may
+> read. Every query is still answered by the database against the caller's session. A guard that is
+> wrong is a UX bug; the security boundary is elsewhere and does not move.
+
+### Errors
+
+`lib/data/supabase/auth-errors.ts` maps provider failures to `AppError`s carrying reviewed copy.
+Provider text is written for developers and can name internal detail, so **it never reaches a
+screen** — the original goes to the logger and the `AppError` gets copy written for the reader.
+
+Sign-in failures are deliberately vague: "Email or password is incorrect" whether the address is
+unknown or the password is wrong. Distinguishing them turns the form into an account-existence
+oracle, which is how credential-stuffing lists get validated. Password reset confirms
+unconditionally for the same reason.
+
+### The account level
+
+`AccountRole` is `member` or `admin`, and **nothing in the client can influence it**. Sign-up has no
+field for it; the database trigger hard-codes `member` and never reads client metadata for it; a
+second trigger blocks any role change arriving through the API. Owner and caregiver remain per-pet
+relationships, not account roles.
+
+### Not implemented
+
+Email confirmation is handled by Supabase's own flow — the app reports that a link was sent but has
+no deep-link handler for the return trip. Password _reset_ is likewise request-only: the email
+arrives, and completing the reset in-app needs a deep link that does not exist yet. OAuth, MFA,
+account deletion, and profile editing are all untouched.
+
 ## Errors
 
 Every error crossing a module boundary is an `AppError` carrying a `code` from a small, closed set
@@ -483,8 +587,9 @@ guessed at now:
 
 - **Notification delivery** — push provider, channels, device registration, and the delivery
   records that would attach to an `Alert`.
-- **Authentication** — sign-in, session storage in `expo-secure-store`, and turning the client's
-  `persistSession` / `autoRefreshToken` back on.
+- **Deep links for email confirmation and password reset** — the emails are sent; completing
+  either journey inside the app needs a link handler that does not exist yet.
+- **OAuth, MFA, account deletion, and profile editing.**
 - **Row-level security policies and the `can_read_pet()` access helper** — fully specified in
   DATABASE.md, deliberately unwritten until `auth.uid()` means something.
 - **The Supabase adapter** for the data ports, and the generated `Database` type that makes its

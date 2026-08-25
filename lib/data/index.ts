@@ -3,5 +3,7 @@
  */
 
 export * from '@/lib/data/ports';
+export { getAuthRepository, resetAuthRepository } from '@/lib/data/auth';
+export type { CreateAuthRepositoryOptions } from '@/lib/data/auth';
 export { createIdFactory, createInMemoryDataSource } from '@/lib/data/in-memory-data-source';
 export type { InMemoryOptions, InMemorySeed } from '@/lib/data/in-memory-data-source';

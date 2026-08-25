@@ -25,6 +25,7 @@ module.exports = {
     'components/**/*.{ts,tsx}',
     'hooks/**/*.{ts,tsx}',
     'lib/data/**/*.{ts,tsx}',
+    'features/**/*.{ts,tsx}',
     '!**/*.d.ts',
     '!**/__tests__/**',
   ],

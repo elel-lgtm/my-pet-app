@@ -11,17 +11,20 @@ the CLI's own default template — it contains no credentials.
 | ------------------------- | ------------------------------------------ |
 | Project                   | Created and linked                         |
 | Client wired into the app | Yes — `lib/supabase/client.ts`             |
-| Migrations                | **10, all applied**                        |
+| Migrations                | **16, all applied**                        |
 | Tables                    | **7**                                      |
 | Row-level security        | **Enabled on all 7**                       |
-| RLS policies              | **None — every table denies all access**   |
+| RLS policies              | **10** — profiles and the pet family       |
 | Generated types           | **Yes** — `lib/supabase/database.types.ts` |
-| Authentication            | **Not implemented**                        |
+| Authentication            | **Implemented** — email and password       |
 | Data in the database      | **None**                                   |
 
-> The schema exists and is locked down. Because RLS is enabled and no policy has been written,
-> PostgreSQL denies every row to every API role. That is deliberate: a policy written before
-> `auth.uid()` means anything would have to be either wrong or dangerously permissive.
+> Access is a relationship, never a role. No policy grants anything for being signed in, and none
+> grants anything for being an administrator. `tests/rls.sql` asserts both against the live
+> database.
+>
+> The `private` schema holds the access helpers and trigger functions. It is not served by
+> PostgREST, which is why they have no `/rest/v1/rpc/` route.
 
 ---
 
@@ -119,12 +122,24 @@ at compile time, so a drift between the two fails CI rather than production.
 
 ## Testing the schema
 
-`tests/constraints.sql` attempts writes that must fail and writes that must succeed, inside a
-transaction that is rolled back. 39 checks; every row of the output must read `ok`.
+Two suites, each inside a transaction that is rolled back:
+
+| Suite                   | Proves                                                | Checks |
+| ----------------------- | ----------------------------------------------------- | ------ |
+| `tests/constraints.sql` | The schema rejects malformed data                     | 39     |
+| `tests/rls.sql`         | The database refuses to show data to the wrong person | 32     |
+
+Every row of either output must read `ok`.
 
 ```bash
-npm run db:verify
+npm run db:verify   # constraints
+npm run db:rls      # row-level security
 ```
+
+The RLS suite creates accounts through `auth.users` so the profile trigger runs for real, then
+switches to the `authenticated` role and sets the JWT claims `auth.uid()` reads. It covers owner,
+caregiver, stranger, and administrator; every share state; soft deletion; anonymous access; and
+every privilege-escalation route.
 
 It is not a Jest test on purpose: it needs a real PostgreSQL instance, and the Jest suite must never
 depend on a live project. It found one genuine bug in this phase — see the `cardinality` note in

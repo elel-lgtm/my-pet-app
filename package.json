@@ -21,6 +21,7 @@
     "db:push:dry": "supabase db push --linked --dry-run",
     "db:types": "supabase gen types typescript --linked > lib/supabase/database.types.ts",
     "db:verify": "supabase db query --linked --file supabase/tests/constraints.sql",
+    "db:rls": "supabase db query --linked --file supabase/tests/rls.sql",
     "db:advisors": "supabase db advisors --linked --level warn",
     "danger:reset-project": "node ./scripts/reset-project.js"
   },
@@ -37,6 +38,7 @@
     "expo-image": "~3.0.11",
     "expo-linking": "~8.0.12",
     "expo-router": "~6.0.24",
+    "expo-secure-store": "~15.0.8",
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "expo-symbols": "~1.0.8",

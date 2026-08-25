@@ -1,3 +1,5 @@
+import { configure } from '@testing-library/react-native';
+
 /**
  * Runs before every test file.
  *
@@ -18,3 +20,12 @@ process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_test_key_not_
 
 // Reanimated ships a Jest mock; without it, animated components throw on mount.
 jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock'));
+
+/**
+ * React Native Testing Library waits one second by default for `waitFor` and `findBy*`. That is
+ * enough on an idle machine and not enough on a busy one: a full run under load was observed
+ * failing a single async assertion that passes consistently otherwise. Raising the budget changes
+ * nothing about what is asserted — a genuinely broken expectation still fails, it just stops the
+ * suite being sensitive to how loaded the machine is.
+ */
+configure({ asyncUtilTimeout: 5000 });

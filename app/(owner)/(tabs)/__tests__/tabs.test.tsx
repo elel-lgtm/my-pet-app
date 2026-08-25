@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react-native';
 
+import { TEST_SESSION, renderWithAuth } from '@/test-support/auth';
+
 import AlertsScreen from '@/app/(owner)/(tabs)/alerts';
 import HomeScreen from '@/app/(owner)/(tabs)/index';
 import MapScreen from '@/app/(owner)/(tabs)/map';
@@ -33,10 +35,18 @@ describe('owner tab screens', () => {
   });
 
   it('Settings reports the build it is running', async () => {
-    await render(<SettingsScreen />);
+    // Settings reads the session for the account row, so it needs the provider.
+    await renderWithAuth(<SettingsScreen />, { initialSession: TEST_SESSION });
 
     expect(screen.getByText('Version')).toBeTruthy();
     // jest.setup.ts pins EXPO_PUBLIC_APP_ENV to development.
     expect(screen.getByText('development')).toBeTruthy();
+  });
+
+  it('Settings shows who is signed in and offers a way out', async () => {
+    await renderWithAuth(<SettingsScreen />, { initialSession: TEST_SESSION });
+
+    expect(screen.getByText(TEST_SESSION.user.email)).toBeTruthy();
+    expect(screen.getByLabelText('Sign out')).toBeTruthy();
   });
 });

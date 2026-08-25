@@ -1,5 +1,6 @@
 import { env } from '@/lib/env';
 import { ConfigurationError } from '@/lib/errors';
+import { sessionStorage } from '@/lib/supabase/session-storage';
 import {
   createSupabaseClient,
   getSupabaseClient,
@@ -24,18 +25,31 @@ describe('createSupabaseClient', () => {
     expect(client.auth).toBeDefined();
   });
 
-  it('disables session persistence, because authentication is not implemented yet', () => {
+  it('persists the session through the injected storage adapter', () => {
     const client = createSupabaseClient(CONFIG);
 
-    // Reaching into internals is unpleasant, but this is the assertion that matters: with
-    // persistence on and no storage adapter, supabase-js reaches for `localStorage`, which does
-    // not exist in React Native.
+    // Reaching into internals is unpleasant, but this is the assertion that matters: persistence
+    // on with no storage adapter makes supabase-js reach for `localStorage`, which does not exist
+    // in React Native, and tokens would silently fail to survive a restart.
     const auth = client.auth as unknown as {
       persistSession?: boolean;
       autoRefreshToken?: boolean;
+      storage?: unknown;
     };
-    expect(auth.persistSession).toBe(false);
-    expect(auth.autoRefreshToken).toBe(false);
+
+    expect(auth.persistSession).toBe(true);
+    expect(auth.autoRefreshToken).toBe(true);
+    expect(auth.storage).toBe(sessionStorage);
+  });
+
+  it('does not look for a session in the URL, which is a browser-only concern', () => {
+    const client = createSupabaseClient(CONFIG);
+    const auth = client.auth as unknown as { detectSessionInUrl?: boolean; flowType?: string };
+
+    expect(auth.detectSessionInUrl).toBe(false);
+    // PKCE over the implicit flow: correct for a public client, where an intercepted redirect
+    // must not be enough to complete a sign-in.
+    expect(auth.flowType).toBe('pkce');
   });
 });
 

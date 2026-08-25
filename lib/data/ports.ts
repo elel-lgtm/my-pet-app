@@ -26,6 +26,11 @@
 
 import { type Alert, type AlertStatus, type RaiseAlertInput } from '@/lib/domain/alert';
 import {
+  type AuthSession,
+  type SignInCredentials,
+  type SignUpCredentials,
+} from '@/lib/domain/auth';
+import {
   type AlertId,
   type IsoDateTime,
   type PetId,
@@ -50,6 +55,46 @@ import { type Result } from '@/lib/result';
 
 /** Every port returns this shape. */
 export type Query<T> = Promise<Result<T, AppError>>;
+
+/**
+ * What happened to the session, normalised away from the provider's vocabulary.
+ *
+ * `initial` is the one that matters at start-up: it fires once when the client has finished
+ * looking for a stored session, whether or not it found one, and is what lets the app tell
+ * "still restoring" apart from "definitely signed out".
+ */
+export type AuthEvent =
+  'initial' | 'signed-in' | 'signed-out' | 'token-refreshed' | 'user-updated' | 'password-recovery';
+
+export type SignUpOutcome = {
+  /** Null when the project requires email confirmation before a session is issued. */
+  readonly session: AuthSession | null;
+  readonly needsEmailConfirmation: boolean;
+};
+
+/**
+ * Authentication operations.
+ *
+ * Identity only. Nothing here decides what a signed-in user may read or write — that is row-level
+ * security, evaluated per request against the session the client attaches.
+ */
+export interface AuthRepository {
+  /** The stored session, if a valid one was restored. Never fails for "not signed in". */
+  getSession(): Query<AuthSession | null>;
+  signIn(credentials: SignInCredentials): Query<AuthSession>;
+  signUp(credentials: SignUpCredentials): Query<SignUpOutcome>;
+  signOut(): Query<void>;
+  /**
+   * Succeeds for any well-formed address, whether or not an account exists. Reporting otherwise
+   * would turn the form into an account-existence oracle.
+   */
+  requestPasswordReset(email: string): Query<void>;
+  /** Returns an unsubscribe function. */
+  onAuthStateChange(listener: (event: AuthEvent, session: AuthSession | null) => void): () => void;
+  /** Driven by app lifecycle: a backgrounded app has its timers throttled. */
+  startAutoRefresh(): void;
+  stopAutoRefresh(): void;
+}
 
 export interface ProfileRepository {
   findById(id: ProfileId): Query<Profile | null>;

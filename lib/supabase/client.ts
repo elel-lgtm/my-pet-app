@@ -9,24 +9,18 @@
  * logic talks to the ports in `@/lib/data`, and only a Supabase adapter behind those ports talks
  * to this client. That is what keeps queries out of render functions and the backend replaceable.
  *
- * ## What this is not
+ * ## What a connected client does and does not give you
  *
- * Connecting a client secures nothing. At the time of writing:
- *
- * - **Authentication is not implemented.** Every request is unauthenticated, so `auth.uid()` is
- *   null and any policy depending on it denies.
- * - **Row-level security is not implemented**, because the schema does not exist yet.
- * - **The production schema does not exist.** There are no tables to query.
- *
- * The publishable key grants nothing on its own; it identifies the project. Authorization comes
- * from row-level security evaluated against the caller's session, and that work is still ahead.
- * See ARCHITECTURE.md and DATABASE.md.
+ * The publishable key grants nothing on its own; it identifies the project. Every permission comes
+ * from row-level security evaluated against the caller's session. Authentication establishes
+ * *identity*; authorization remains the database's job. See ARCHITECTURE.md and DATABASE.md.
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import { env, type SupabaseConfig } from '@/lib/env';
 import { type Database } from '@/lib/supabase/database.types';
+import { sessionStorage } from '@/lib/supabase/session-storage';
 import { ConfigurationError } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 
@@ -53,17 +47,25 @@ export type AppSupabaseClient = SupabaseClient<Database>;
 export function createSupabaseClient(config: SupabaseConfig): AppSupabaseClient {
   return createClient<Database>(config.url, config.publishableKey, {
     auth: {
-      // All three are off because authentication is not implemented yet. There is no session to
-      // persist, nothing to refresh, and no browser redirect to inspect. Turning persistence on
-      // without supplying a storage adapter would make supabase-js reach for `localStorage`,
-      // which does not exist in React Native.
-      //
-      // When authentication lands, these become `true` alongside a storage adapter backed by
-      // expo-secure-store, so tokens are held in the platform keystore rather than in plain
-      // AsyncStorage. `detectSessionInUrl` stays false: it is a browser-only concern.
-      persistSession: false,
-      autoRefreshToken: false,
+      // Sessions are held in the device keystore on native and localStorage on web. See
+      // session-storage.ts for why the native path chunks values rather than using AsyncStorage.
+      storage: sessionStorage,
+      persistSession: true,
+
+      // Refresh is on, but the timer is driven by app lifecycle rather than left running: the
+      // auth feature calls startAutoRefresh/stopAutoRefresh from an AppState listener, because a
+      // backgrounded React Native app has its timers throttled and a refresh that fires late is
+      // worse than one scheduled on foreground. See features/auth.
+      autoRefreshToken: true,
+
+      // Browser-only: it parses tokens out of a redirect URL fragment. React Native has no such
+      // URL, and leaving it on makes supabase-js touch `window.location`.
       detectSessionInUrl: false,
+
+      // PKCE over the implicit flow. It is the correct choice for a public client: the token is
+      // exchanged with a proof the initiating app holds, so an intercepted redirect is not enough
+      // to complete a sign-in.
+      flowType: 'pkce',
     },
   });
 }
