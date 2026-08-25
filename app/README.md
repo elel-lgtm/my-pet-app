@@ -23,24 +23,36 @@ app/
 A directory in parentheses is a **route group**: it organises files without contributing a URL
 segment. `app/(owner)/(tabs)/index.tsx` serves `/`, not `/owner/tabs`.
 
-`(owner)` exists so that caregiver and admin areas can be added as **sibling groups** rather than
-as extra tabs:
+`(owner)` exists so that the caregiver and administration areas can be added as **sibling groups**
+rather than as extra tabs:
 
 ```
 app/
-  (owner)/(tabs)/...      5 tabs
-  (caregiver)/(tabs)/...  a different tab set entirely
-  (admin)/...             probably not tabs at all
+  (owner)/(tabs)/...      5 tabs — pets you own
+  (caregiver)/(tabs)/...  a different tab set — pets shared with you
+  (admin)/...             platform administration; probably not tabs at all
 ```
 
-Each role gets its own navigator, its own tab set, and its own chrome. The alternative — one tab
-bar with tabs conditionally hidden — leaks the existence of every role into every session and gets
-harder to reason about with each role added.
+Each area gets its own navigator, tab set, and chrome. The alternative — one tab bar with tabs
+conditionally hidden — leaks the existence of every area into every session and gets harder to
+reason about with each one added.
 
-**No role-based authentication exists yet.** `(owner)` is simply the anchor route, set via
-`unstable_settings` in the root layout. When authentication arrives, the root layout picks the
-group to redirect into based on the signed-in user's role; nothing about the routes below has to
-change.
+Two of these three are **not** role-gated, and the distinction matters:
+
+- `(owner)` and `(caregiver)` are two views the _same account_ moves between. Owner and caregiver
+  are relationships to individual pets, not account roles — one person routinely is both. Which
+  area to open is a question of what the user is doing, not who they are.
+- `(admin)` is the only genuinely gated area. It is reached only by an account whose `AccountRole`
+  is `admin`, and it contains **platform administration only** — accounts, support, configuration,
+  system health. It is not a route to other people's pets or locations; administrators have no
+  automatic access to those. See [ARCHITECTURE.md](../ARCHITECTURE.md).
+
+**No authentication exists yet.** `(owner)` is simply the anchor route, set via `unstable_settings`
+in the root layout. When authentication arrives the root layout chooses the entry area; nothing
+about the routes below has to change.
+
+Reaching a route is not permission to see its data. A gated group keeps a screen out of the way; it
+is the server that refuses the query behind it.
 
 ## Adding a screen
 

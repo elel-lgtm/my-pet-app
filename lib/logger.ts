@@ -29,8 +29,16 @@ const LEVEL_RANK: Record<LogLevel, number> = {
   silent: 100,
 };
 
-/** Keys whose values are replaced before a record leaves the process. */
-const REDACTED_KEY_PATTERN = /(password|token|secret|authorization|api[-_]?key|cookie)/i;
+/**
+ * Keys whose values are replaced before a record leaves the process.
+ *
+ * Covers credentials and authentication material of every generation: passwords, bearer tokens,
+ * JWTs, cookies, API keys, and both Supabase key formats. `publishable` is included even though a
+ * publishable key is not secret — redacting it costs nothing and keeps project identity out of
+ * whatever third-party sink a log record eventually reaches.
+ */
+const REDACTED_KEY_PATTERN =
+  /(password|token|secret|authorization|api[-_]?key|cookie|jwt|bearer|credential|publishable|anon[-_]?key|service[-_]?role)/i;
 
 function redact(data: Record<string, unknown>): Record<string, unknown> {
   const output: Record<string, unknown> = {};

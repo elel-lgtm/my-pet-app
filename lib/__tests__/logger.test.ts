@@ -76,6 +76,35 @@ describe('logger', () => {
     });
   });
 
+  it.each([
+    ['password'],
+    ['accessToken'],
+    ['refreshToken'],
+    ['apiKey'],
+    ['authorization'],
+    ['jwt'],
+    ['bearerToken'],
+    ['supabasePublishableKey'],
+    ['anonKey'],
+    ['serviceRoleKey'],
+  ])('redacts a field named %s', (field) => {
+    createLogger('auth').info('config', { [field]: 'the-actual-value' });
+
+    expect(JSON.stringify(recordAt(capture.records, 0).data)).not.toContain('the-actual-value');
+  });
+
+  it('leaves non-credential fields legible, so records stay useful', () => {
+    createLogger('supabase').info('Creating client', {
+      url: 'https://test-project.supabase.co',
+      attempt: 1,
+    });
+
+    expect(recordAt(capture.records, 0).data).toEqual({
+      url: 'https://test-project.supabase.co',
+      attempt: 1,
+    });
+  });
+
   it('normalises a thrown value and lifts its code into the record', () => {
     createLogger('api').error('request failed', new AppError('network', 'offline'));
 

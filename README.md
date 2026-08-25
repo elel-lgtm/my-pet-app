@@ -50,6 +50,21 @@ one**.
 Values are read and validated once, at startup, in [lib/env.ts](lib/env.ts). A missing or malformed
 value fails loudly there rather than surfacing as an `undefined` somewhere downstream.
 
+### Supabase
+
+The two Supabase variables come from **Project Settings → API** in the dashboard. Both are public
+and expected to ship in the bundle; they are optional in development and required in staging and
+production.
+
+**Never put the `service_role` key, the database password, or the JWT secret in this project.** The
+`service_role` key bypasses row-level security, and a mobile bundle is trivially inspected —
+shipping one would give every installed copy of the app unrestricted access to every user's data.
+Startup validation rejects one if it is pasted into the publishable variable, but that is a
+backstop rather than the control.
+
+Authentication, row-level security, the database schema, and GPS tracking are **not implemented
+yet**. See [ARCHITECTURE.md](ARCHITECTURE.md) and [supabase/README.md](supabase/README.md).
+
 ## Project layout
 
 ```

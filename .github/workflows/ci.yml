@@ -37,6 +37,10 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # No Supabase credentials are configured for CI, deliberately. jest.setup.ts supplies fake
+      # values, no test reaches the network, and typecheck and lint need no backend at all. If a
+      # step here ever appears to need a real project, that is a sign the test is wrong rather
+      # than a reason to add a secret.
       - name: Test
         run: npm run test -- --ci --coverage
 

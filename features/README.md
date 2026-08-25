@@ -33,5 +33,10 @@ features/
    not there.
 4. **Pure logic goes in `model.ts`.** Functions that take data and return data need no test
    harness, no mocks, and no renderer — which is what makes them cheap to test thoroughly.
+5. **Shared vocabulary comes from `@/lib/domain`.** `Pet`, `Alert`, `SafeZone` and friends belong
+   to the whole app, not to one feature. `model.ts` holds what is genuinely local to the feature.
+6. **Data comes through `@/lib/data` ports, never from a database client.** A feature receives an
+   `AppDataSource` and calls its repositories; it never imports Supabase, and it never decides
+   authorization for itself — the server does. See ARCHITECTURE.md.
 
 See [ARCHITECTURE.md](../ARCHITECTURE.md) for how this fits with the rest of the project.
