@@ -92,9 +92,16 @@ update public.profiles set role = 'admin' where id = '55555555-5555-4555-8555-55
 -- ---------------------------------------------------------------------------------------------
 -- Profile synchronisation
 -- ---------------------------------------------------------------------------------------------
+-- Scoped to this suite's own fixtures. Counting the whole table would make the assertion depend
+-- on whatever real accounts happen to exist in the project.
 select pg_temp.expect(
   'trigger_creates_one_profile_per_account',
-  (select count(*) from public.profiles), 5);
+  (select count(*) from public.profiles
+   where id in ('11111111-1111-4111-8111-111111111111',
+                '22222222-2222-4222-8222-222222222222',
+                '33333333-3333-4333-8333-333333333333',
+                '44444444-4444-4444-8444-444444444444',
+                '55555555-5555-4555-8555-555555555555')), 5);
 
 select pg_temp.expect(
   'trigger_takes_display_name_from_metadata',
@@ -114,7 +121,12 @@ select pg_temp.expect(
 
 select pg_temp.expect(
   'no_account_is_admin_by_default',
-  (select count(*) from public.profiles where role = 'admin'), 1);
+  (select count(*) from public.profiles where role = 'admin'
+   and id in ('11111111-1111-4111-8111-111111111111',
+              '22222222-2222-4222-8222-222222222222',
+              '33333333-3333-4333-8333-333333333333',
+              '44444444-4444-4444-8444-444444444444',
+              '55555555-5555-4555-8555-555555555555')), 1);
 
 -- ---------------------------------------------------------------------------------------------
 -- Pets and shares
@@ -207,11 +219,37 @@ select pg_temp.expect('unexpired_share_grants_access',
   pg_temp.count_as('22222222-2222-4222-8222-222222222222', 'select count(*) from public.pets'), 1);
 
 -- ---------------------------------------------------------------------------------------------
--- Soft deletion hides a pet from its own owner
+-- Soft deletion
+--
+-- An owner CAN still see the rows they deleted; everyone else cannot. That asymmetry is deliberate
+-- and load-bearing: PostgreSQL applies a SELECT policy to the new row produced by an UPDATE, so a
+-- policy hiding deleted rows from their owner also makes deleting them impossible. See the
+-- allow_owner_soft_delete migration. The application filters `deleted_at is null` on every read,
+-- which is what keeps them off screen.
 -- ---------------------------------------------------------------------------------------------
 update public.pets set deleted_at = now() where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
-select pg_temp.expect('soft_deleted_pet_is_invisible',
-  pg_temp.count_as('11111111-1111-4111-8111-111111111111', 'select count(*) from public.pets'), 1);
+
+select pg_temp.expect('owner_still_sees_their_own_deleted_pet_at_the_database_level',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111', 'select count(*) from public.pets'), 2);
+
+-- What the app actually asks for, and therefore what a user sees.
+select pg_temp.expect('application_filter_hides_the_deleted_pet',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+                   'select count(*) from public.pets where deleted_at is null'), 1);
+
+-- The security-relevant half: nobody else may see it, deleted or not.
+select pg_temp.expect('caregiver_cannot_see_a_deleted_pet',
+  pg_temp.count_as('22222222-2222-4222-8222-222222222222',
+    $q$ select count(*) from public.pets where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' $q$), 0);
+
+select pg_temp.expect('stranger_cannot_see_a_deleted_pet',
+  pg_temp.count_as('33333333-3333-4333-8333-333333333333',
+    $q$ select count(*) from public.pets where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' $q$), 0);
+
+select pg_temp.expect('admin_cannot_see_a_deleted_pet',
+  pg_temp.count_as('55555555-5555-4555-8555-555555555555',
+    $q$ select count(*) from public.pets where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' $q$), 0);
+
 update public.pets set deleted_at = null where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 
 -- ---------------------------------------------------------------------------------------------
@@ -250,7 +288,9 @@ select pg_temp.expect('account_cannot_edit_another_profile',
         select count(*) from updated $q$), 0);
 
 select pg_temp.expect('role_survived_every_escalation_attempt',
-  (select count(*) from public.profiles where role = 'admin'), 1);
+  (select count(*) from public.profiles where role = 'admin'
+   and id in ('11111111-1111-4111-8111-111111111111',
+              '55555555-5555-4555-8555-555555555555')), 1);
 
 -- ---------------------------------------------------------------------------------------------
 -- Writes
@@ -281,6 +321,138 @@ select pg_temp.must_reject_as(
   '11111111-1111-4111-8111-111111111111',
   $q$ insert into public.safe_zones (pet_id, name, center_latitude, center_longitude, radius_meters)
       values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Later', 51.5, -0.12, 150) $q$);
+
+-- ---------------------------------------------------------------------------------------------
+-- Pet management writes (Phase 11)
+--
+-- The create/update/archive paths the app now exposes, exercised as each kind of caller.
+-- ---------------------------------------------------------------------------------------------
+-- RETURNING the row's own columns, exactly as the adapter's
+-- `.insert(...).select(<columns>).single()` does. This matters: `returning 1` projects no column of
+-- the new row, so PostgreSQL never applies the SELECT policy to it, and an earlier version of this
+-- check passed while the real app failed with 42501. Never weaken this back to a constant.
+select pg_temp.expect('owner_can_create_a_pet_for_themselves',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with inserted as (
+          insert into public.pets (owner_id, name, species)
+          values ('11111111-1111-4111-8111-111111111111', 'Created', 'dog')
+          returning id, owner_id, name, species, status, created_at)
+        select count(*) from inserted $q$), 1);
+
+-- The same statement shape for an update, which the adapter also issues with a projection.
+select pg_temp.expect('owner_can_update_and_read_back_the_row',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with updated as (
+          update public.pets set name = 'Read back'
+          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+          returning id, owner_id, name, status, updated_at)
+        select count(*) from updated $q$), 1);
+
+-- And for the soft delete, whose adapter call selects `id` back.
+select pg_temp.expect('owner_can_soft_delete_and_read_back_the_row',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with removed as (
+          update public.pets set deleted_at = now()
+          where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+          returning id)
+        select count(*) from removed $q$), 1);
+update public.pets set deleted_at = null where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+select pg_temp.must_reject_as(
+  'owner_cannot_create_a_pet_owned_by_someone_else',
+  '22222222-2222-4222-8222-222222222222',
+  $q$ insert into public.pets (owner_id, name, species)
+      values ('11111111-1111-4111-8111-111111111111', 'Planted', 'dog') $q$);
+
+select pg_temp.expect('owner_can_rename_their_own_pet',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with updated as (
+          update public.pets set name = 'Renamed'
+          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' returning 1)
+        select count(*) from updated $q$), 1);
+
+select pg_temp.expect('stranger_cannot_update_another_owners_pet',
+  pg_temp.count_as('33333333-3333-4333-8333-333333333333',
+    $q$ with updated as (
+          update public.pets set name = 'Hijacked'
+          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' returning 1)
+        select count(*) from updated $q$), 0);
+
+-- A share grants reading, never writing. Caregiver access must not drift into ownership.
+select pg_temp.expect('caregiver_cannot_update_a_shared_pet',
+  pg_temp.count_as('22222222-2222-4222-8222-222222222222',
+    $q$ with updated as (
+          update public.pets set name = 'Caregiver edit'
+          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' returning 1)
+        select count(*) from updated $q$), 0);
+
+select pg_temp.expect('caregiver_cannot_archive_a_shared_pet',
+  pg_temp.count_as('22222222-2222-4222-8222-222222222222',
+    $q$ with updated as (
+          update public.pets set status = 'archived'
+          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' returning 1)
+        select count(*) from updated $q$), 0);
+
+select pg_temp.expect('admin_cannot_update_any_pet',
+  pg_temp.count_as('55555555-5555-4555-8555-555555555555',
+    $q$ with updated as (
+          update public.pets set name = 'Admin edit'
+          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' returning 1)
+        select count(*) from updated $q$), 0);
+
+-- The `with check` re-tests the new row, so an update that hands the pet away fails its own check.
+select pg_temp.must_reject_as(
+  'owner_cannot_transfer_ownership_through_an_update',
+  '11111111-1111-4111-8111-111111111111',
+  $q$ update public.pets set owner_id = '33333333-3333-4333-8333-333333333333'
+      where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' $q$);
+
+-- Archive is a status change, and stays visible and reversible.
+select pg_temp.expect('owner_can_archive_and_still_see_the_pet',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with updated as (
+          update public.pets set status = 'archived'
+          where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' returning 1)
+        select count(*) from public.pets where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+          and (select count(*) from updated) = 1 $q$), 1);
+
+select pg_temp.expect('owner_can_restore_an_archived_pet',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with updated as (
+          update public.pets set status = 'active'
+          where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' returning 1)
+        select count(*) from updated $q$), 1);
+
+-- Soft delete hides the pet from every read, including its owner's.
+select pg_temp.expect('owner_can_soft_delete_their_pet',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with updated as (
+          update public.pets set deleted_at = now()
+          where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' returning 1)
+        select count(*) from updated $q$), 1);
+
+-- Gone from every read the application makes; still present for its owner at the database level,
+-- which is what allows the delete to happen at all.
+select pg_temp.expect('soft_deleted_pet_is_gone_from_application_reads',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ select count(*) from public.pets
+        where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' and deleted_at is null $q$), 0);
+
+-- And cannot be written again: pets_update requires deleted_at is null.
+select pg_temp.expect('soft_deleted_pet_cannot_be_edited_back',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with updated as (
+          update public.pets set deleted_at = null
+          where id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' returning 1)
+        select count(*) from updated $q$), 0);
+
+-- No DELETE policy exists on pets, so a hard delete is refused outright.
+select pg_temp.expect('owner_cannot_hard_delete_a_pet',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with removed as (
+          delete from public.pets
+          where id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' returning 1)
+        select count(*) from removed $q$), 0);
 
 -- ---------------------------------------------------------------------------------------------
 -- Anonymous callers

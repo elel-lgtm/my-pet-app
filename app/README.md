@@ -30,6 +30,9 @@ rather than as extra tabs:
 app/
   (auth)/...              sign-in, sign-up, forgot-password — reached only when signed out
   (owner)/(tabs)/...      5 tabs — pets you own
+  (owner)/pets/new              add a pet (modal)
+  (owner)/pets/[id]/index       pet detail
+  (owner)/pets/[id]/edit        edit a pet
   (caregiver)/(tabs)/...  a different tab set — pets shared with you (not built)
   (admin)/...             platform administration; probably not tabs at all (not built)
 ```
@@ -65,6 +68,17 @@ both halves back while the session is restored is what stops private chrome appe
 Reaching a route is not permission to see its data. A gated group keeps a screen out of the way; it
 is the database that refuses the query behind it. Route guards are a UX concern; row-level security
 is the boundary.
+
+## Route parameters are untrusted
+
+A parameter arrives from a deep link, a pasted URL, or a stale notification, and nothing guarantees
+it is well formed. `usePetIdParam` checks the `id` segment is a uuid before anything uses it and
+returns null otherwise, so the screen renders "not found" instead of the database rejecting the
+query with a syntax error.
+
+A valid-looking id is still not permission: a pet belonging to someone else passes validation, comes
+back empty from the database, and is reported as not found — never as forbidden, which would confirm
+it exists.
 
 ## Adding a screen
 

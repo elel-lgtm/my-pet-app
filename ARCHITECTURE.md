@@ -307,8 +307,9 @@ The Supabase project exists, the schema is applied with row-level security enfor
 authentication works.
 
 > **GPS TRACKING IS NOT IMPLEMENTED.**
-> **No pet, map, alert, or sharing feature is implemented** — those screens are placeholders.
-> **There is no data in the database.**
+> **No map, alert, tracker, or sharing feature is implemented** — those screens are placeholders.
+>
+> Pet management **is** implemented: list, create, detail, edit, archive, and soft delete.
 
 Ten policies are in place. Access is a relationship, never a role: an owner reaches pets they own, a
 caregiver reaches pets shared with them by an accepted and unexpired share, and nobody else reaches
@@ -494,7 +495,47 @@ before the app discovers the user is signed out.
 > read. Every query is still answered by the database against the caller's session. A guard that is
 > wrong is a UX bug; the security boundary is elsewhere and does not move.
 
-### Errors
+### Pet management
+
+The first product feature, and the template every later one should follow: a vertical slice from
+screen to policy that adds no new architecture.
+
+```
+app/(owner)/pets/*            routes; validate params, render a feature screen
+features/pets                 state, screens, presentation
+lib/data/ports.ts             PetRepository — the contract
+lib/data/supabase/            the adapter; the only place a column name appears
+PostgreSQL + RLS              the actual boundary
+```
+
+`PetsProvider` is mounted in `app/(owner)/_layout`, not at the root. It is meaningless without a
+session, and that subtree unmounts on sign-out — which is what stops one account's pets surviving
+into another's.
+
+### What the feature does
+
+Listing with five distinct states (loading, populated, empty, error, and refreshing over a populated
+list), create, detail, edit, archive, and soft delete. Archive and delete are different operations
+with different reversibility; the distinction and its reasoning are in
+[features/pets/README.md](features/pets/README.md).
+
+### Where authorization actually happens
+
+Nothing in `features/pets` or the adapter decides who may see or change a pet. The adapter issues a
+query with **no `where owner_id = …` filter**, deliberately: `pets_select` already resolves ownership
+and effective shares through `can_read_pet`, and a defensive filter in the adapter would be a second
+copy of the access rule — the copy that gets forgotten when sharing changes, and that hides a
+missing policy instead of exposing it.
+
+A pet the caller may not see simply does not come back, and the detail screen reports it as _not
+found_ rather than _forbidden_. Saying "you are not allowed" would confirm the pet exists.
+
+### Photos
+
+`photoUrl` is honoured whenever set; upload is not implemented. No storage bucket exists, and
+creating one is a backend decision rather than a UI one — see the deferred list below.
+
+### Authentication errors
 
 `lib/data/supabase/auth-errors.ts` maps provider failures to `AppError`s carrying reviewed copy.
 Provider text is written for developers and can name internal detail, so **it never reaches a
@@ -590,6 +631,9 @@ guessed at now:
 - **Deep links for email confirmation and password reset** — the emails are sent; completing
   either journey inside the app needs a link handler that does not exist yet.
 - **OAuth, MFA, account deletion, and profile editing.**
+- **Pet photo storage** — a Supabase Storage bucket, its policies, an upload flow, and image
+  resizing. `PetAvatar` already renders `photoUrl` when present, so the UI needs no change when it
+  arrives.
 - **Row-level security policies and the `can_read_pet()` access helper** — fully specified in
   DATABASE.md, deliberately unwritten until `auth.uid()` means something.
 - **The Supabase adapter** for the data ports, and the generated `Database` type that makes its

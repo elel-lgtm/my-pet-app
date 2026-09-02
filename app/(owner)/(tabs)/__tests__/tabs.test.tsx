@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react-native';
+import { render, screen, waitFor } from '@testing-library/react-native';
 
 import { TEST_SESSION, renderWithAuth } from '@/test-support/auth';
+import { renderWithPets } from '@/test-support/pets';
 
 import AlertsScreen from '@/app/(owner)/(tabs)/alerts';
 import HomeScreen from '@/app/(owner)/(tabs)/index';
@@ -17,9 +18,10 @@ describe('owner tab screens', () => {
   });
 
   it('Pets shows an empty roster', async () => {
-    await render(<PetsScreen />);
+    // The Pets tab is a real screen now: it reads the session and the owner's pets.
+    await renderWithPets(<PetsScreen />, { initialPets: [] });
 
-    expect(screen.getByText('No pets yet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByText('No pets yet')).toBeTruthy());
   });
 
   it('Map says the provider is not chosen', async () => {

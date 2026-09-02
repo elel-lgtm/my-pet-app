@@ -8,7 +8,7 @@ The PostgreSQL schema behind MY PET APP, as applied to the linked Supabase proje
 
 |                                |                                                     |
 | ------------------------------ | --------------------------------------------------- |
-| Migrations written and applied | **Yes** — 16 migrations, all applied                |
+| Migrations written and applied | **Yes** — 17 migrations, all applied                |
 | Tables                         | **7**, all created                                  |
 | Row-level security             | **Enabled on all 7 tables**                         |
 | RLS policies                   | **10** — profiles (3) and the pet family (7)        |
@@ -320,7 +320,7 @@ expressions are evaluated as the querying user.
 | `profiles`      | `profiles_select_self` | Read your own profile, and only your own                      |
 | `profiles`      | `profiles_insert_self` | Create a profile whose id is your own account                 |
 | `profiles`      | `profiles_update_self` | Edit your own profile (except `role` — see below)             |
-| `pets`          | `pets_select`          | Owned or effectively shared, and not soft-deleted             |
+| `pets`          | `pets_select`          | Owned + not deleted; **or** owned and deleted (see below)     |
 | `pets`          | `pets_insert`          | Create a pet you own                                          |
 | `pets`          | `pets_update`          | Edit a pet you own; `with check` blocks reassigning ownership |
 | `pet_locations` | `pet_locations_select` | Read where you can read the pet                               |
@@ -335,6 +335,38 @@ row.
 **No DELETE policy exists on any table.** Pets are soft-deleted through the update policy; profiles
 are removed by the cascade from `auth.users`.
 
+### Soft deletion and the SELECT policy
+
+`pets_select` admits two cases, and the second one is not cosmetic:
+
+```sql
+using (
+  (deleted_at is null and private.can_read_pet(id))
+  or (deleted_at is not null and owner_id = (select auth.uid()))
+)
+```
+
+The original policy was only the first clause. That reads as an obviously correct "hide deleted
+pets" — and it also made soft deletion **impossible**, for everyone including the owner.
+
+When a table has a SELECT policy, PostgreSQL applies that policy to the _new_ row produced by an
+`UPDATE`, on top of the UPDATE policy's own `with check`. An update setting `deleted_at` produces a
+row the SELECT policy excludes, so the statement was rejected with `new row violates row-level
+security policy for table "pets"` even though `pets_update`'s check was perfectly satisfied. The
+behaviour was confirmed against this database with a controlled probe: the same `UPDATE` succeeds
+with no SELECT policy present and fails the moment one is added, with or without `RETURNING`.
+
+The second clause is scoped to `owner_id = auth.uid()`, so a deleted pet stays invisible to
+caregivers, administrators, and strangers — asserted by four checks in `tests/rls.sql`. The
+application still filters `deleted_at is null` on every read, so nothing deleted appears on screen.
+
+`pets_update` is deliberately unchanged: its `using (… and deleted_at is null)` keeps a deleted pet
+from being edited or undeleted through the API, so soft deletion stays a one-way door for clients.
+
+A `SECURITY DEFINER` RPC would have left the SELECT policy untouched, but it must live in `public`
+to be reachable over PostgREST — reintroducing the exposed definer-rights function that migration
+`20260825201942` removed, and a standing advisor warning with it.
+
 ### What is deliberately not granted
 
 - **No administrator bypass.** No policy mentions `role = 'admin'`. An administrator reading these
@@ -343,7 +375,8 @@ are removed by the cascade from `auth.users`.
 - **No blanket authenticated access.** `auth.uid() is not null` appears in no policy. Being signed
   in is not a reason to see somebody's pet.
 - **No client writes to `pet_locations`, `safe_zones`, `alerts`, or `pet_shares`.** Those belong to
-  the feature phases that introduce them. Location writes will never be granted to clients at all:
+  the feature phases that introduce them. Pets themselves are writable by their owner, and only by
+  their owner. Location writes will never be granted to clients at all:
   a client that can forge its own pet's location can forge a safe-zone breach, and every alert
   downstream inherits the lie.
 
@@ -386,15 +419,17 @@ is meant to be appointed.
 
 Two SQL suites, each running inside a transaction that is rolled back.
 
-| Suite                            | Proves                                                  | Checks              |
-| -------------------------------- | ------------------------------------------------------- | ------------------- |
-| `supabase/tests/constraints.sql` | The schema rejects malformed data                       | **39, all passing** |
-| `supabase/tests/rls.sql`         | The database refuses to _show_ data to the wrong person | **32, all passing** |
+| Suite                            | Proves                                                             | Checks              |
+| -------------------------------- | ------------------------------------------------------------------ | ------------------- |
+| `supabase/tests/constraints.sql` | The schema rejects malformed data                                  | **39, all passing** |
+| `supabase/tests/rls.sql`         | The database refuses to _show or change_ data for the wrong person | **50, all passing** |
 
 The RLS suite simulates real signed-in sessions by switching to the `authenticated` role and setting
-the JWT claims `auth.uid()` reads, then asks what each user can see. It covers owner, caregiver,
-stranger, and administrator; every share state including elapsed-but-still-marked-accepted; soft
-deletion; anonymous access; and every privilege-escalation route.
+the JWT claims `auth.uid()` reads, then asks what each user can see and change. It covers owner,
+caregiver, stranger, and administrator; every share state including elapsed-but-still-marked-
+accepted; soft deletion; anonymous access; every privilege-escalation route; and the whole pet
+create, update, archive, and delete surface — including that a caregiver's share never becomes
+ownership and that ownership cannot be transferred through an update.
 
 ```bash
 npm run db:verify     # constraint suite
@@ -407,7 +442,7 @@ never depend on a live project.
 
 ## Migrations
 
-Sixteen, forward-only, all applied. Details and the CLI workflow are in
+Seventeen, forward-only, all applied. Details and the CLI workflow are in
 [supabase/README.md](supabase/README.md).
 
 ---
