@@ -306,10 +306,12 @@ development and test only, applies no authorization, and is imported by no UI co
 The Supabase project exists, the schema is applied with row-level security enforced, and
 authentication works.
 
-> **GPS TRACKING IS NOT IMPLEMENTED.**
-> **No map, alert, tracker, or sharing feature is implemented** — those screens are placeholders.
+> **NO GPS HARDWARE IS CONNECTED.** No provider has been chosen and nothing reports positions.
+> **No map, alert, or sharing feature is implemented** — those screens are placeholders.
 >
 > Pet management **is** implemented: list, create, detail, edit, archive, and soft delete.
+> The **tracking foundation** is implemented: tracker lifecycle, position history, access rules, and
+> a pet's last known position on its profile.
 
 Ten policies are in place. Access is a relationship, never a role: an owner reaches pets they own, a
 caregiver reaches pets shared with them by an accepted and unexpired share, and nobody else reaches
@@ -560,6 +562,62 @@ no deep-link handler for the return trip. Password _reset_ is likewise request-o
 arrives, and completing the reset in-app needs a deep link that does not exist yet. OAuth, MFA,
 account deletion, and profile editing are all untouched.
 
+## GPS tracking
+
+The foundation, not the feature. **No hardware provider, GPS vendor, IoT protocol, or map SDK has
+been chosen**, nothing reports positions into the system, and the Map tab says so rather than
+pretending otherwise.
+
+What exists is everything that does not depend on that choice: a provider-neutral domain model, the
+data ports and adapters, the access rules, and a pet's tracker and last known position on its
+profile.
+
+### Where the boundary sits
+
+```
+features/tracking            hook, presentation, card, map placeholder
+lib/domain/tracking.ts       staleness and freshness, pure
+lib/data/ports.ts            TrackerRepository, LocationRepository
+lib/data/supabase/           adapters; the only place a column name appears
+PostgreSQL + RLS             the actual boundary
+```
+
+`RecordLocationInput` **is** the provider-neutral ingestion type. No parallel "fix" type was added:
+it already carries device identity, pet, coordinates, accuracy, speed, source, and the recorded
+time, and a second near-identical shape would be duplicate architecture rather than a boundary.
+
+Heading, altitude, and a per-fix battery reading were deliberately **not** added. No chosen provider
+requires them, battery already lives on the tracker where it belongs, and columns added on the
+strength of what hardware "might" report are the ones that arrive null forever.
+
+### Latest, stale, unavailable
+
+There is one source of truth for position: `pet_locations`. "Current location" is the newest row by
+`recorded_at` — never by `created_at`, because a tracker that loses signal buffers fixes and uploads
+them late, so arrival order is not travel order.
+
+`resolveTracking` takes the staleness threshold as a **required argument**. How old a position may
+be before it stops being current is a product decision nobody has made, so nothing here guesses at
+one; the app passes the already-approved `TRACKER_OFFLINE_AFTER_MINUTES`. See
+[features/tracking/README.md](features/tracking/README.md).
+
+A silent _device_ and a stale _position_ are tracked separately, because a tracker can check in
+without producing a new fix.
+
+### Location ingestion is a server-side boundary that does not exist yet
+
+`pet_locations` has a SELECT policy and **no INSERT policy**. Every client write is refused by the
+database. That is the security property the whole feature rests on:
+
+> A client that can write its own pet's position can forge a safe-zone breach, and every alert
+> downstream inherits the lie.
+
+Production ingestion therefore has to be a service that holds a privileged key and never ships to a
+device: hardware reports to it, it validates and writes. It is **not built**, and no privileged
+credential exists anywhere in this repository or in any `EXPO_PUBLIC_*` variable. The deterministic
+fix generator in `test-support/tracking.ts` is the development stand-in; it is test support and
+writes to nothing.
+
 ## Errors
 
 Every error crossing a module boundary is an `AppError` carrying a `code` from a small, closed set
@@ -631,6 +689,11 @@ guessed at now:
 - **Deep links for email confirmation and password reset** — the emails are sent; completing
   either journey inside the app needs a link handler that does not exist yet.
 - **OAuth, MFA, account deletion, and profile editing.**
+- **A GPS hardware or provider choice**, and the server-side ingestion endpoint that follows from
+  it. Until then no position can enter the system.
+- **A map provider**, which for most options brings an API key and a billing account.
+- **A live-tracking freshness threshold**, distinct from the device-silence window.
+- **Location retention.** History grows without bound today; see DATABASE.md.
 - **Pet photo storage** — a Supabase Storage bucket, its policies, an upload flow, and image
   resizing. `PetAvatar` already renders `photoUrl` when present, so the UI needs no change when it
   arrives.

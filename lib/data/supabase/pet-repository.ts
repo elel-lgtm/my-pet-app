@@ -25,15 +25,12 @@ import {
   type PetStatus,
   type UpdatePetInput,
 } from '@/lib/domain/pet';
+import { unsafeId, type PetId, type ProfileId } from '@/lib/domain/ids';
 import {
-  unsafeId,
-  unsafeIsoDate,
-  unsafeIsoDateTime,
-  type IsoDate,
-  type IsoDateTime,
-  type PetId,
-  type ProfileId,
-} from '@/lib/domain/ids';
+  toIsoDateTime,
+  toOptionalIsoDate,
+  toOptionalIsoDateTime,
+} from '@/lib/data/supabase/row-mapping';
 import { type AppSupabaseClient } from '@/lib/supabase';
 import { type Database } from '@/lib/supabase/database.types';
 import { type AppError } from '@/lib/errors';
@@ -49,32 +46,6 @@ type PetUpdate = Database['public']['Tables']['pets']['Update'];
 /** Every column the domain needs. Named explicitly so a schema addition cannot silently widen it. */
 const PET_COLUMNS =
   'id, owner_id, name, species, breed, date_of_birth, photo_url, notes, status, lost_at, created_at, updated_at, deleted_at';
-
-/**
- * Normalises a PostgreSQL timestamp to the exact ISO form `IsoDateTime` promises.
- *
- * PostgREST emits RFC 3339 with **microsecond** precision and a full offset, e.g.
- * `2026-08-25T21:30:27.358632+00:00`. That is close to the domain's format but not equal to it:
- * `isIsoDateTime` requires a millisecond `Z` form, so passing the raw value through would make the
- * branded type a lie the moment anything checked it.
- *
- * An unparseable value is returned as-is rather than thrown on. This mapper runs inside render
- * paths, and a `RangeError` from a date would take a screen down over a field nothing was about to
- * display.
- */
-function toIsoDateTime(value: string): IsoDateTime {
-  const parsed = new Date(value);
-  return unsafeIsoDateTime(Number.isNaN(parsed.getTime()) ? value : parsed.toISOString());
-}
-
-function toOptionalIsoDateTime(value: string | null): IsoDateTime | null {
-  return value === null ? null : toIsoDateTime(value);
-}
-
-/** `date` columns come back as `YYYY-MM-DD`, which is already the shape `IsoDate` wants. */
-function toOptionalIsoDate(value: string | null): IsoDate | null {
-  return value === null ? null : unsafeIsoDate(value.slice(0, 10));
-}
 
 /** Row → domain. The one place a column name meets a domain field name. */
 export function toPet(row: PetRow): Pet {

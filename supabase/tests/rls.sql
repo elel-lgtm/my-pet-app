@@ -455,6 +455,125 @@ select pg_temp.expect('owner_cannot_hard_delete_a_pet',
         select count(*) from removed $q$), 0);
 
 -- ---------------------------------------------------------------------------------------------
+-- Trackers (Phase 12)
+--
+-- The share is accepted and unexpired at this point, so the caregiver can read pet aaaa.
+-- ---------------------------------------------------------------------------------------------
+
+-- Registering a device projects its own columns back, the same statement shape the adapter issues.
+-- `returning 1` would not exercise the SELECT policy and would hide a Phase 11-style failure.
+select pg_temp.expect('owner_can_register_a_tracker',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with inserted as (
+          insert into public.trackers (owner_id, serial_number, pet_id)
+          values ('11111111-1111-4111-8111-111111111111', 'DEV-0001',
+                  'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')
+          returning id, owner_id, serial_number, status, pet_id, created_at)
+        select count(*) from inserted $q$), 1);
+
+select pg_temp.expect('owner_sees_own_tracker',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ select count(*) from public.trackers $q$), 1);
+
+-- A caregiver needs to know whether the device on a shared pet is silent.
+select pg_temp.expect('caregiver_sees_tracker_on_a_shared_pet',
+  pg_temp.count_as('22222222-2222-4222-8222-222222222222',
+    $q$ select count(*) from public.trackers $q$), 1);
+
+select pg_temp.expect('stranger_sees_no_tracker',
+  pg_temp.count_as('33333333-3333-4333-8333-333333333333',
+    $q$ select count(*) from public.trackers $q$), 0);
+
+-- The two-axis model again: administration confers nothing over a device.
+select pg_temp.expect('admin_sees_no_tracker',
+  pg_temp.count_as('55555555-5555-4555-8555-555555555555',
+    $q$ select count(*) from public.trackers $q$), 0);
+
+-- Sharing a pet lends visibility, never control of hardware.
+select pg_temp.expect('caregiver_cannot_rename_a_tracker',
+  pg_temp.count_as('22222222-2222-4222-8222-222222222222',
+    $q$ with updated as (
+          update public.trackers set label = 'Caregiver rename' returning 1)
+        select count(*) from updated $q$), 0);
+
+select pg_temp.expect('caregiver_cannot_unassign_a_tracker',
+  pg_temp.count_as('22222222-2222-4222-8222-222222222222',
+    $q$ with updated as (update public.trackers set pet_id = null returning 1)
+        select count(*) from updated $q$), 0);
+
+select pg_temp.expect('admin_cannot_change_a_tracker',
+  pg_temp.count_as('55555555-5555-4555-8555-555555555555',
+    $q$ with updated as (update public.trackers set label = 'Admin' returning 1)
+        select count(*) from updated $q$), 0);
+
+select pg_temp.must_reject_as(
+  'stranger_cannot_register_a_tracker_for_someone_else',
+  '33333333-3333-4333-8333-333333333333',
+  $q$ insert into public.trackers (owner_id, serial_number)
+      values ('11111111-1111-4111-8111-111111111111', 'DEV-STOLEN') $q$);
+
+-- The ownership invariant. Pet bbbb belongs to the owner too, so this must succeed...
+select pg_temp.expect('owner_can_move_a_tracker_between_own_pets',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with updated as (
+          update public.trackers set pet_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+          returning id, pet_id)
+        select count(*) from updated $q$), 1);
+
+-- ...while a pet belonging to the stranger must be refused by the composite foreign key.
+insert into public.pets (id, owner_id, name, species)
+values ('eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', '33333333-3333-4333-8333-333333333333',
+        'Not yours', 'cat');
+
+select pg_temp.must_reject_as(
+  'owner_cannot_assign_a_tracker_to_another_owners_pet',
+  '11111111-1111-4111-8111-111111111111',
+  $q$ update public.trackers set pet_id = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' $q$);
+
+select pg_temp.must_reject_as(
+  'owner_cannot_transfer_a_tracker_to_another_account',
+  '11111111-1111-4111-8111-111111111111',
+  $q$ update public.trackers set owner_id = '33333333-3333-4333-8333-333333333333' $q$);
+
+-- No DELETE policy: devices are retired, so the history they produced stays attributable.
+select pg_temp.expect('nobody_can_delete_a_tracker',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ with removed as (delete from public.trackers returning 1) select count(*) from removed $q$), 0);
+
+-- ---------------------------------------------------------------------------------------------
+-- Location history (Phase 12)
+-- ---------------------------------------------------------------------------------------------
+select pg_temp.expect('owner_reads_location_history',
+  pg_temp.count_as('11111111-1111-4111-8111-111111111111',
+    $q$ select count(*) from public.pet_locations $q$), 1);
+
+select pg_temp.expect('caregiver_reads_location_history_for_a_shared_pet',
+  pg_temp.count_as('22222222-2222-4222-8222-222222222222',
+    $q$ select count(*) from public.pet_locations $q$), 1);
+
+select pg_temp.expect('stranger_reads_no_location_history',
+  pg_temp.count_as('33333333-3333-4333-8333-333333333333',
+    $q$ select count(*) from public.pet_locations $q$), 0);
+
+select pg_temp.expect('admin_reads_no_location_history',
+  pg_temp.count_as('55555555-5555-4555-8555-555555555555',
+    $q$ select count(*) from public.pet_locations $q$), 0);
+
+-- The security property of the whole tracking feature: a client that can write its own pet's
+-- position can forge a safe-zone breach, and every alert downstream inherits the lie.
+select pg_temp.must_reject_as(
+  'owner_cannot_write_a_location_from_the_client',
+  '11111111-1111-4111-8111-111111111111',
+  $q$ insert into public.pet_locations (pet_id, latitude, longitude, source, recorded_at)
+      values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 51.5, -0.12, 'manual', now()) $q$);
+
+select pg_temp.must_reject_as(
+  'caregiver_cannot_write_a_location_from_the_client',
+  '22222222-2222-4222-8222-222222222222',
+  $q$ insert into public.pet_locations (pet_id, latitude, longitude, source, recorded_at)
+      values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 51.5, -0.12, 'manual', now()) $q$);
+
+-- ---------------------------------------------------------------------------------------------
 -- Anonymous callers
 -- ---------------------------------------------------------------------------------------------
 do $$

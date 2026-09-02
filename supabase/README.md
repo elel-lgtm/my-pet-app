@@ -11,7 +11,7 @@ the CLI's own default template — it contains no credentials.
 | ------------------------- | ------------------------------------------ |
 | Project                   | Created and linked                         |
 | Client wired into the app | Yes — `lib/supabase/client.ts`             |
-| Migrations                | **16, all applied**                        |
+| Migrations                | **19, all applied**                        |
 | Tables                    | **7**                                      |
 | Row-level security        | **Enabled on all 7**                       |
 | RLS policies              | **10** — profiles and the pet family       |

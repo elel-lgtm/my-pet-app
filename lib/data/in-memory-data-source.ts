@@ -234,6 +234,10 @@ export function createInMemoryDataSource(options: InMemoryOptions = {}): AppData
         return ok(trackers.get(id) ?? null);
       },
 
+      async findForPet(petId: PetId): Query<Tracker | null> {
+        return ok([...trackers.values()].find((tracker) => tracker.petId === petId) ?? null);
+      },
+
       async register(ownerId: ProfileId, input: RegisterTrackerInput): Query<Tracker> {
         const duplicate = [...trackers.values()].some(
           (tracker) => tracker.serialNumber === input.serialNumber

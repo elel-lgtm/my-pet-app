@@ -21,6 +21,16 @@ const mockPush = jest.fn();
 const mockBack = jest.fn();
 const mockCanGoBack = jest.fn(() => true);
 
+jest.mock('@/features/tracking', () => {
+  const react = require('react');
+  const { Text } = require('react-native');
+  return {
+    // The card has its own tests in features/tracking. Stubbing it keeps these focused on pets and
+    // stops the detail screen reaching for a Supabase client during a pets test.
+    TrackingCard: () => react.createElement(Text, { testID: 'tracking-card-stub' }, 'Tracking'),
+  };
+});
+
 jest.mock('expo-router', () => ({
   useRouter: () => ({
     push: mockPush,
@@ -199,8 +209,10 @@ describe('detail', () => {
 
     await waitFor(() => expect(screen.getByText('Biscuit')).toBeTruthy());
     expect(screen.getByText('Scared of bikes')).toBeTruthy();
-    expect(screen.getByText('Tracker')).toBeTruthy();
+    // Tracking is now a real section; safe zones and alerts remain honest placeholders.
+    expect(screen.getByTestId('tracking-card-stub')).toBeTruthy();
     expect(screen.getByText('Safe zones')).toBeTruthy();
+    expect(screen.getByText('Alerts')).toBeTruthy();
   });
 
   /** Saying "not allowed" would confirm the pet exists. Absent and forbidden look the same. */

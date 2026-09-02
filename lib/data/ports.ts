@@ -119,6 +119,13 @@ export interface PetRepository {
 export interface TrackerRepository {
   listForOwner(ownerId: ProfileId): Query<readonly Tracker[]>;
   findById(id: TrackerId): Query<Tracker | null>;
+  /**
+   * The device currently attached to a pet, or null.
+   *
+   * Scoped by the pet rather than the owner because a caregiver may read the tracker on a pet
+   * shared with them but is not its owner, so `listForOwner` would return nothing for them.
+   */
+  findForPet(petId: PetId): Query<Tracker | null>;
   register(ownerId: ProfileId, input: RegisterTrackerInput): Query<Tracker>;
   /** `null` unassigns the device without retiring it. */
   assignToPet(id: TrackerId, petId: PetId | null): Query<Tracker>;

@@ -24,10 +24,12 @@ describe('owner tab screens', () => {
     await waitFor(() => expect(screen.getByText('No pets yet')).toBeTruthy());
   });
 
-  it('Map says the provider is not chosen', async () => {
+  it('Map says plainly that live tracking does not exist yet', async () => {
     await render(<MapScreen />);
 
-    expect(screen.getByText('Map coming soon')).toBeTruthy();
+    // The screen must never imply the product tracks pets while no hardware reports into it.
+    expect(screen.getByText('Map is not available yet')).toBeTruthy();
+    expect(screen.getByText(/Nothing is connected yet/)).toBeTruthy();
   });
 
   it('Alerts shows an empty list', async () => {

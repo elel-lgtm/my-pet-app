@@ -25,6 +25,7 @@ import {
   statusTone,
 } from '@/features/pets/pet-presentation';
 import { usePets } from '@/features/pets/pets-provider';
+import { TrackingCard } from '@/features/tracking';
 import { canTransitionPetStatus } from '@/lib/domain/pet';
 import { type PetId } from '@/lib/domain/ids';
 import { userMessageFor } from '@/lib/errors';
@@ -163,11 +164,13 @@ export function PetDetailScreen({ petId }: { petId: PetId | null }) {
           </Section>
         ) : null}
 
-        {/* Where the rest of the product will attach. Stated as absent rather than mocked up. */}
-        <Section title="Tracking" description="Coming in a later update.">
+        <Section title="Tracking">
+          <TrackingCard petId={pet.id} />
+        </Section>
+
+        {/* Still to come. Stated as absent rather than mocked up. */}
+        <Section title="Safety" description="Coming in a later update.">
           <Surface padded={false}>
-            <ListItem title="Tracker" subtitle="No device linked yet" showChevron={false} />
-            <Divider />
             <ListItem title="Safe zones" subtitle="Not set up yet" showChevron={false} />
             <Divider />
             <ListItem title="Alerts" subtitle="Nothing to show" showChevron={false} />

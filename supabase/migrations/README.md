@@ -1,19 +1,28 @@
 # Migrations
 
-Ten forward-only migrations, all applied to the linked project.
+Nineteen forward-only migrations, all applied to the linked project.
 
-| #   | File                                    | Contents                                        |
-| --- | --------------------------------------- | ----------------------------------------------- |
-| 1   | `…_enums.sql`                           | 10 enum types                                   |
-| 2   | `…_touch_updated_at.sql`                | The shared `updated_at` trigger function        |
-| 3   | `…_profiles.sql`                        | `profiles` + RLS + trigger                      |
-| 4   | `…_pets.sql`                            | `pets` + RLS + trigger                          |
-| 5   | `…_trackers.sql`                        | `trackers` + RLS + trigger                      |
-| 6   | `…_pet_shares.sql`                      | `pet_shares` + RLS + trigger                    |
-| 7   | `…_safe_zones.sql`                      | `safe_zones` + RLS + trigger                    |
-| 8   | `…_pet_locations.sql`                   | `pet_locations` + RLS (append-only, no trigger) |
-| 9   | `…_alerts.sql`                          | `alerts` + RLS + trigger                        |
-| 10  | `…_fix_share_permissions_not_empty.sql` | Corrects a CHECK that never rejected anything   |
+| #   | File                                         | Contents                                                |
+| --- | -------------------------------------------- | ------------------------------------------------------- |
+| 1   | `…_enums.sql`                                | 10 enum types                                           |
+| 2   | `…_touch_updated_at.sql`                     | The shared `updated_at` trigger function                |
+| 3   | `…_profiles.sql`                             | `profiles` + RLS + trigger                              |
+| 4   | `…_pets.sql`                                 | `pets` + RLS + trigger                                  |
+| 5   | `…_trackers.sql`                             | `trackers` + RLS + trigger                              |
+| 6   | `…_pet_shares.sql`                           | `pet_shares` + RLS + trigger                            |
+| 7   | `…_safe_zones.sql`                           | `safe_zones` + RLS + trigger                            |
+| 8   | `…_pet_locations.sql`                        | `pet_locations` + RLS (append-only, no trigger)         |
+| 9   | `…_alerts.sql`                               | `alerts` + RLS + trigger                                |
+| 10  | `…_fix_share_permissions_not_empty.sql`      | Corrects a CHECK that never rejected anything           |
+| 11  | `…_auth_profile_sync.sql`                    | `handle_new_user` trigger on `auth.users`               |
+| 12  | `…_profile_role_protection.sql`              | Blocks role changes made through the API                |
+| 13  | `…_profiles_rls_policies.sql`                | The first policies: read and edit yourself              |
+| 14  | `…_pet_access_helpers.sql`                   | `can_read_pet()`, `owns_pet()`                          |
+| 15  | `…_pet_rls_policies.sql`                     | Pet family read access                                  |
+| 16  | `…_harden_function_exposure.sql`             | Moves helper and trigger functions to a non-REST schema |
+| 17  | `…_allow_owner_soft_delete.sql`              | Lets an owner soft-delete their own pet                 |
+| 18  | `…_fix_pets_select_for_insert_returning.sql` | Fixes create failing under `INSERT … RETURNING`         |
+| 19  | `…_tracker_rls_policies.sql`                 | Opens `trackers` to its owner and the pet’s caregivers  |
 
 Order is driven by foreign keys: each table depends only on tables created before it.
 

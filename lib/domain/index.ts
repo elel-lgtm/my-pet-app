@@ -17,4 +17,5 @@ export * from '@/lib/domain/pet-share';
 export * from '@/lib/domain/profile';
 export * from '@/lib/domain/safe-zone';
 export * from '@/lib/domain/tracker';
+export * from '@/lib/domain/tracking';
 export * from '@/lib/domain/validation';

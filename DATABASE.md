@@ -6,17 +6,17 @@ The PostgreSQL schema behind MY PET APP, as applied to the linked Supabase proje
 
 ## Status
 
-|                                |                                                     |
-| ------------------------------ | --------------------------------------------------- |
-| Migrations written and applied | **Yes** — 17 migrations, all applied                |
-| Tables                         | **7**, all created                                  |
-| Row-level security             | **Enabled on all 7 tables**                         |
-| RLS policies                   | **10** — profiles (3) and the pet family (7)        |
-| Authentication                 | **Implemented** — Supabase Auth, email and password |
-| Profile synchronisation        | **Implemented** — trigger on `auth.users`           |
-| Role protection                | **Implemented** — no account can promote itself     |
-| Generated TypeScript types     | **Yes** — `lib/supabase/database.types.ts`          |
-| Data in the database           | **None**                                            |
+|                                |                                                                 |
+| ------------------------------ | --------------------------------------------------------------- |
+| Migrations written and applied | **Yes** — 19 migrations, all applied                            |
+| Tables                         | **7**, all created                                              |
+| Row-level security             | **Enabled on all 7 tables**                                     |
+| RLS policies                   | **13** — profiles (3), pets (3), trackers (3), child tables (4) |
+| Authentication                 | **Implemented** — Supabase Auth, email and password             |
+| Profile synchronisation        | **Implemented** — trigger on `auth.users`                       |
+| Role protection                | **Implemented** — no account can promote itself                 |
+| Generated TypeScript types     | **Yes** — `lib/supabase/database.types.ts`                      |
+| Data in the database           | **None**                                                        |
 
 > **Access is a relationship, never a role.** An owner reaches pets they own; a caregiver reaches
 > pets shared with them by an accepted, unexpired share; nobody else reaches anything. There is no
@@ -335,6 +335,40 @@ row.
 **No DELETE policy exists on any table.** Pets are soft-deleted through the update policy; profiles
 are removed by the cascade from `auth.users`.
 
+### Trackers
+
+Until Phase 12 the table had row-level security enabled and **no policies at all**, so it denied
+every read and write. That was the correct resting state while nothing used it, and it is why the
+tracker half of the product could not function.
+
+| Policy            | Grants                                                                          |
+| ----------------- | ------------------------------------------------------------------------------- |
+| `trackers_select` | The owner, **or** anyone who can already read the pet the device is attached to |
+| `trackers_insert` | Register a device you own                                                       |
+| `trackers_update` | The owner only: rename, assign, retire, heartbeat                               |
+
+The second read clause exists so a caregiver looking at a shared pet can see whether its device is
+silent. Without it they would be shown "no tracker" for a pet that has one, which is worse than
+unhelpful when the animal is missing. Writes stay owner-only: sharing a pet lends visibility, never
+control of hardware.
+
+The owner branch of `trackers_select` is a **direct column comparison and comes first**, so `or`
+short-circuits before the definer helper is reached. That is what keeps `INSERT … RETURNING
+<columns>` working — the failure mode diagnosed on `pets` in migration `20260902194013`. The suite
+registers a tracker with a full column projection precisely to keep that honest.
+
+There is **no DELETE policy**. Devices are retired through `status`; deleting one would set
+`pet_locations.tracker_id` to null and quietly detach the history it produced.
+
+#### The cross-owner assignment invariant
+
+A tracker cannot be pointed at another account's pet, and that is enforced **structurally** rather
+than by policy: `trackers` carries a composite foreign key `(pet_id, owner_id) → pets (id, owner_id)`.
+Combined with `with check (owner_id = auth.uid())`, which pins the row to the caller before and
+after an update, the only pets a client can reach are its own. Neither half suffices alone; together
+they make cross-owner assignment unrepresentable. Both refusals are asserted in `tests/rls.sql`
+(`23503` for the foreign key, `42501` for the check).
+
 ### Soft deletion and the SELECT policy
 
 `pets_select` admits two cases, and the second one is not cosmetic:
@@ -374,9 +408,12 @@ to be reachable over PostgREST — reintroducing the exposed definer-rights func
   zero pets, locations, safe zones, and alerts.
 - **No blanket authenticated access.** `auth.uid() is not null` appears in no policy. Being signed
   in is not a reason to see somebody's pet.
-- **No client writes to `pet_locations`, `safe_zones`, `alerts`, or `pet_shares`.** Those belong to
-  the feature phases that introduce them. Pets themselves are writable by their owner, and only by
-  their owner. Location writes will never be granted to clients at all:
+- **No client writes to `pet_locations`, `safe_zones`, `alerts`, or `pet_shares`.** Pets and
+  trackers are writable by their owner, and only by their owner.
+- **`pet_locations` will never accept a client write.** It has a SELECT policy and no INSERT policy,
+  permanently: a client that can write its own pet's position can forge a safe-zone breach, and
+  every alert downstream inherits the lie. Positions arrive through a server-side ingestion service
+  that holds a privileged key and is **not built yet**. Location writes will never be granted to clients at all:
   a client that can forge its own pet's location can forge a safe-zone breach, and every alert
   downstream inherits the lie.
 
@@ -422,7 +459,7 @@ Two SQL suites, each running inside a transaction that is rolled back.
 | Suite                            | Proves                                                             | Checks              |
 | -------------------------------- | ------------------------------------------------------------------ | ------------------- |
 | `supabase/tests/constraints.sql` | The schema rejects malformed data                                  | **39, all passing** |
-| `supabase/tests/rls.sql`         | The database refuses to _show or change_ data for the wrong person | **50, all passing** |
+| `supabase/tests/rls.sql`         | The database refuses to _show or change_ data for the wrong person | **71, all passing** |
 
 The RLS suite simulates real signed-in sessions by switching to the `authenticated` role and setting
 the JWT claims `auth.uid()` reads, then asks what each user can see and change. It covers owner,
@@ -442,7 +479,7 @@ never depend on a live project.
 
 ## Migrations
 
-Seventeen, forward-only, all applied. Details and the CLI workflow are in
+Nineteen, forward-only, all applied. Details and the CLI workflow are in
 [supabase/README.md](supabase/README.md).
 
 ---
