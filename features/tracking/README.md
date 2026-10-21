@@ -2,8 +2,12 @@
 
 GPS trackers, position history, and what the app can honestly say about them.
 
-**No hardware provider has been chosen and nothing reports positions into this system.** Everything
-here is provider-neutral scaffolding plus the parts that do not depend on that choice.
+**Nothing reports positions into this system.** Everything here is provider-neutral scaffolding plus
+the parts that do not depend on a hardware choice.
+
+A candidate device — the Mictrack MT710 — has been identified but **not adopted**, and the open
+compatibility question is recorded in [HARDWARE.md](HARDWARE.md). Nothing in this directory depends
+on it: `RecordLocationInput` is already the shape a vendor decoder would translate into.
 
 ## What lives here
 

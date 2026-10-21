@@ -564,9 +564,21 @@ account deletion, and profile editing are all untouched.
 
 ## GPS tracking
 
-The foundation, not the feature. **No hardware provider, GPS vendor, IoT protocol, or map SDK has
-been chosen**, nothing reports positions into the system, and the Map tab says so rather than
-pretending otherwise.
+The foundation, not the feature. Nothing reports positions into the system, and the Map tab says so
+rather than pretending otherwise.
+
+**A candidate device has been identified but not adopted**: the Mictrack MT710, provisionally, over
+Traccar's `tlt2h` handler. No hardware has been bought, no accounts created, no ingestion service
+built, and no schema changed. The decision record — including the compatibility question that is
+still open — is [features/tracking/HARDWARE.md](features/tracking/HARDWARE.md).
+
+> The provisional case rests on Safaricom Kenya selling NB-IoT connectivity we can actually buy, on
+> a band the device supports. That is **unconfirmed**: Safaricom's B20 is confirmed for LTE
+> broadband and its NB-IoT is evidenced in commercial use, but "device supports B20, operator uses
+> B20" conflates band support with service availability. It needs an answer from Safaricom, not
+> more desk research.
+
+**No map SDK has been chosen**, and no live-tracking freshness threshold has been set.
 
 What exists is everything that does not depend on that choice: a provider-neutral domain model, the
 data ports and adapters, the access rules, and a pet's tracker and last known position on its
@@ -689,8 +701,12 @@ guessed at now:
 - **Deep links for email confirmation and password reset** — the emails are sent; completing
   either journey inside the app needs a link handler that does not exist yet.
 - **OAuth, MFA, account deletion, and profile editing.**
-- **A GPS hardware or provider choice**, and the server-side ingestion endpoint that follows from
-  it. Until then no position can enter the system.
+- **Confirming the GPS hardware choice.** The Mictrack MT710 is provisional; adoption depends on
+  physical testing against a real Safaricom SIM. See
+  [features/tracking/HARDWARE.md](features/tracking/HARDWARE.md).
+- **The server-side ingestion service**, and how it authenticates a device. An IMEI presented over a
+  socket is an assertion of identity, not proof of one, so that must be designed before any port
+  opens. Until the service exists, no position can enter the system.
 - **A map provider**, which for most options brings an API key and a billing account.
 - **A live-tracking freshness threshold**, distinct from the device-silence window.
 - **Location retention.** History grows without bound today; see DATABASE.md.
